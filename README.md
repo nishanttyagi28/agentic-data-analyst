@@ -5,26 +5,39 @@
 [![Groq](https://img.shields.io/badge/LLM-Groq%20Llama%203.3-orange)](https://groq.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Upload a CSV, ask questions in plain English, and get data cleaning, EDA, stats tests, forecasts, ML models, downloadable reports, and RAG-powered follow-ups — all from a single chat interface.
+Upload CSV(s), ask questions in plain English, and get cleaning, proactive insight suggestions, multi-table SQL, AutoML, stats, forecasts, reports, and RAG follow-ups — from a single chat.
 
 **Live Demo:** [https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/)
 
 ## What This Tool Can Do
 
-A complete self-serve data analyst replacement for standard requests:
+A strong self-serve **technical analyst** for standard and multi-step requests:
 
 | Capability | What you can ask / do |
 |------------|------------------------|
-| **Data cleaning** | Quality score after upload; missing values, duplicates, type issues, outliers, inconsistent categories. One-click auto-clean (median/mode impute + drop exact duplicates) or skip. |
-| **SQL queries** | Counts, filters, rankings, aggregations in plain English (SELECT/CTE only — safe). |
+| **Data cleaning** | Quality score after upload; missing values, duplicates, type issues, outliers. Safe auto-clean (median/mode + drop exact dups) or skip. |
+| **Ambiguous decisions** | When categories look synonymous (e.g. USA/US) or a column looks ID-like, you get explicit choices — merge / keep separate / exclude from ML. Nothing ambiguous is auto-decided. |
+| **Proactive insights** | “Suggest what to explore” — 3–5 concrete, data-specific questions (correlations, imbalances, spikes). Click to run. |
+| **SQL (incl. multi-table)** | Counts, filters, rankings, CTEs/window functions; multi-CSV upload with join-key hints and JOIN-capable SQL. |
 | **EDA** | Full descriptive stats, correlation heatmap, distributions, group-by charts, time-series when dates exist. |
-| **Stats tests** | t-test / ANOVA for group differences, correlation rankings vs a target, outlier summaries — with plain-English caveats. |
-| **Forecasting** | Linear-trend forecasts with approximate confidence bands when a date + metric exists (or row-order fallback). |
-| **ML modeling** | Classification, regression, or clustering with metrics and feature importance. |
-| **Reports** | Generate a downloadable HTML report anytime (executive summary + session findings). |
-| **Follow-up chat (RAG)** | Ask about prior SQL/ML/stats/forecast/quality results with citations. |
+| **Stats tests** | t-test / ANOVA, correlation rankings, outlier summaries — with plain-English caveats. |
+| **Forecasting** | Linear-trend estimates with uncertainty bands; mixed-format dates; non-negative clip for counts; event framing when irregular. |
+| **AutoML** | Tries multiple models (e.g. logistic regression, random forest, XGBoost), light hyperparameter search, feature prep, driver language, overfit/leakage flags. |
+| **Business context** | Optional “what’s this data about?” field to bias insight wording and report framing. |
+| **Reports** | Downloadable HTML with executive summary from the session so far. |
+| **Follow-up chat (RAG)** | Ask about prior findings with citations. |
 
 All of the above is routed through the **same chat** — no separate modes to learn.
+
+### What this tool does **not** replace
+
+Be explicit about remaining human work:
+
+- **Business strategy & stakeholder communication** — suggestions and reports help; they do not set goals, politics, or executive narrative for you.
+- **Causal claims** — correlations, models, and tests are association-based unless you design a proper experiment.
+- **Production ML systems** — AutoML here is exploratory on session data, not deployment pipelines, monitoring, or fairness audits.
+- **Domain judgment on merges & IDs** — the app surfaces options; you still choose whether “US” = “USA”.
+- **Heavy time-series / econometrics** — forecasts are lightweight trend estimates, not full ARIMA/Prophet ensembles.
 
 ## Business Problem & Solution
 

@@ -128,3 +128,40 @@
 - Auto-clean never drops outliers or merges categories without user action.
 - Stats/forecast language always includes caveats (sample size, correlation ≠ causation, estimate bands).
 - Works on small sample CSVs (~25–30 rows) and synthetic messy data.
+
+---
+
+## Maximum technical analyst upgrade (Phases H–L)
+
+### Phase H — Proactive insights
+
+38. **Rule-based suggestions (no LLM by default)** — Correlation pairs, group comparisons, target-like columns, anomaly spikes (strict IQR 2.5×), class imbalance, heavy missing. Keeps free-tier token use low; clickable labels map to normal orchestrator routes.
+
+### Phase I — AutoML
+
+39. **Multi-candidate models** — Classification: LogisticRegression, RandomForest, XGBoost; Regression: Ridge, RF, XGBoost. Tiny ParameterGrid only (session-friendly).
+40. **Feature prep** — Date → month/dow/year; drop high-cardinality categoricals (>40 levels) with a flag; exclude likely IDs.
+41. **Overfit flags** — Small n + very high accuracy/R² called out in summary (not left as silent “perfect score”).
+
+### Phase J — Multi-table
+
+42. **In-memory table registry + SQLite tables** — Multiple CSVs load as named tables; first/single file remains `user_data` for backward compatibility.
+43. **Join-key heuristic** — Shared column names + value overlap; surfaced in sidebar and SQL schema prompt so the LLM can JOIN.
+
+### Phase K — Business context
+
+44. **Optional free-text context** — Stored on Orchestrator; passed into insight wording and ML summary prompts. Blank = previous behavior.
+
+### Phase L — Ambiguous decisions
+
+45. **Decision objects on quality report** — Category merge options with counts; ID-vs-feature options. Apply only on explicit user click (`apply_category_merge` / `exclude_ml_cols`). Never silent merge.
+
+### Testing log (H–L)
+
+| # | Phase | Bug | Fix |
+|---|-------|-----|-----|
+| 1 | I | `Ridge(random_state=...)` not valid on all sklearn builds | Removed `random_state` from Ridge |
+| 2 | L | `build_decision_options` → `analyze_data_quality` recursion risk | Build cat issues from df/report without re-entering analyze |
+| 3 | H–L | (preventive) multi-table SQL must see all tables | `run_sql_query(..., tables=)` + multi schema context |
+
+Full regression re-run after H–L: see self_test output at ship time.

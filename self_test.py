@@ -16,9 +16,16 @@ import pandas as pd
 
 from agents.forecast_agent import parse_mixed_dates, run_forecast
 from agents.ingestion import ingest_csv
+from agents.insight_agent import generate_insight_suggestions
 from agents.ml_agent import run_eda, run_ml_analysis
+from agents.multitable import detect_join_keys
 from agents.orchestrator import Orchestrator, classify_query
-from agents.quality_agent import analyze_data_quality, apply_auto_clean, format_quality_markdown
+from agents.quality_agent import (
+    analyze_data_quality,
+    apply_auto_clean,
+    apply_category_merge,
+    format_quality_markdown,
+)
 from agents.rag_agent import RAGAgent
 from agents.report_agent import generate_report
 from agents.sql_agent import (
@@ -142,6 +149,11 @@ def _messi_style_dataframe() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _is_rate_limited(result: dict | None) -> bool:
+    err = str((result or {}).get("error") or "")
+    return "429" in err or "rate_limit" in err.lower() or "Rate limit" in err
+
+
 def test_sql_multi_clause_generation():
     print("\n=== SQL Multi-Clause Generation (LLM) ===")
     if not HAS_API_KEY:
@@ -155,6 +167,10 @@ def test_sql_multi_clause_generation():
     # Pattern 1: top N per group
     q1 = "For each season, show the top 2 competitions by average goals per match, ranked within season"
     r1 = run_sql_query(q1, engine)
+    if _is_rate_limited(r1):
+        skip("top-N-per-group success", "Groq rate limit")
+        skip("remaining multi-clause LLM checks", "Groq rate limit")
+        return
     check("top-N-per-group success", r1.get("success"), r1.get("error", ""))
     if r1.get("success"):
         sql1 = r1.get("sql") or ""
@@ -470,6 +486,125 @@ def test_orchestrator_routing():
     check("report route", classify_query("Generate a report of my analysis", True, False)[0] == "report")
     check("outliers stats route", classify_query("Are there any outliers I should know about?", True, False)[0] == "stats")
     check("correlation stats route", classify_query("What's correlated with churn?", True, False)[0] == "stats")
+    check("insight route", classify_query("Suggest what to explore", True, False)[0] == "insight")
+
+
+def test_phase_h_insights():
+    print("\n=== Phase H: Proactive Insights ===")
+    df = pd.read_csv(os.path.join(SAMPLE_DIR, "customer_churn.csv"))
+    ins = generate_insight_suggestions(df, business_context="SaaS churn analytics")
+    check("insights success", ins["success"], ins.get("error", ""))
+    sugs = ins.get("suggestions") or []
+    check("3-5 suggestions", 3 <= len(sugs) <= 5, f"n={len(sugs)}")
+    check("suggestions have questions", all(s.get("question") for s in sugs))
+    check("not purely generic", any(
+        k in (s.get("label") or "").lower()
+        for s in sugs
+        for k in ("churn", "correlat", "missing", "spike", "outlier", "contract", "charge")
+    ), str([s.get("label") for s in sugs]))
+
+
+def test_phase_i_automl():
+    print("\n=== Phase I: AutoML ===")
+    df = pd.read_csv(os.path.join(SAMPLE_DIR, "customer_churn.csv"))
+    # Avoid LLM if possible for speed — still may call for summary
+    result = run_ml_analysis(df, "Train a classification model to predict churn", business_context="SaaS")
+    check("automl success", result["success"], result.get("error", ""))
+    if result["success"]:
+        check("has model_name", bool(result.get("model_name")))
+        check("leaderboard 2+", len(result.get("leaderboard") or []) >= 2, str(result.get("leaderboard")))
+        check("drivers plain language", bool(result.get("drivers")))
+        check("risk flags on small perfect data", len(result.get("risk_flags") or []) >= 1, str(result.get("risk_flags")))
+        check("metrics present", "accuracy" in (result.get("metrics") or {}) or "r2" in (result.get("metrics") or {}))
+
+
+def test_phase_j_multitable():
+    print("\n=== Phase J: Multi-table ===")
+    # messi-style split: matches + competitions lookup
+    matches = pd.DataFrame({
+        "competition_id": [1, 1, 2, 2, 3, 3, 1, 2],
+        "season": ["2022/23"] * 4 + ["2023/24"] * 4,
+        "goals": [2, 1, 0, 3, 1, 2, 0, 1],
+    })
+    competitions = pd.DataFrame({
+        "competition_id": [1, 2, 3],
+        "competition": ["La Liga", "UCL", "Copa"],
+        "region": ["ES", "EU", "ES"],
+    })
+    joins = detect_join_keys({"matches": matches, "competitions": competitions})
+    check("detects competition_id join", any(j.get("left_column") == "competition_id" for j in joins), str(joins))
+
+    engine = get_engine()
+    orch = Orchestrator(engine, f"mt_{uuid.uuid4().hex[:6]}", tables={})
+    r1 = orch.add_table(matches, "matches")
+    r2 = orch.add_table(competitions, "competitions")
+    check("register matches", r1.get("success"), r1.get("error", ""))
+    check("register competitions", r2.get("success"), r2.get("error", ""))
+    check("two tables loaded", len(orch.tables) == 2, str(list(orch.tables.keys())))
+    check("orch join suggestions", len(orch.join_suggestions) >= 1)
+
+    from agents.sql_agent import build_schema_context
+    schema_txt = build_schema_context(engine, tables=orch.tables)
+    check("schema lists matches", "matches" in schema_txt)
+    check("schema lists competitions", "competitions" in schema_txt)
+    check("schema mentions join", "join" in schema_txt.lower() or "competition_id" in schema_txt)
+
+    if HAS_API_KEY:
+        q = "Combine matches and competitions to show total goals by competition name"
+        res = run_sql_query(q, engine, tables=orch.tables)
+        if _is_rate_limited(res):
+            skip("join SQL LLM", "Groq rate limit")
+        else:
+            check("join SQL success", res.get("success"), res.get("error", ""))
+            if res.get("success"):
+                sql = res.get("sql") or ""
+                print(f"  SQL[join]: {sql[:280]}...")
+                check("SQL has JOIN", "JOIN" in sql.upper(), sql[:200])
+                check("join returned rows", len(res.get("result") or []) > 0)
+    else:
+        skip("join SQL LLM", "GROQ_API_KEY not set")
+
+
+def test_phase_k_business_context():
+    print("\n=== Phase K: Business context ===")
+    df = pd.read_csv(os.path.join(SAMPLE_DIR, "house_prices.csv"))
+    ins_blank = generate_insight_suggestions(df, business_context="")
+    ins_ctx = generate_insight_suggestions(df, business_context="Regional housing market inventory")
+    check("insights without context", ins_blank["success"])
+    check("insights with context", ins_ctx["success"])
+    # Context stored on orchestrator
+    orch = Orchestrator(get_engine(), "ctx1", dataframe=df, business_context="Housing")
+    check("orch context set", orch.business_context == "Housing")
+    orch.set_business_context("Updated context")
+    check("orch context update", orch.business_context == "Updated context")
+
+
+def test_phase_l_decisions():
+    print("\n=== Phase L: Ambiguous decisions ===")
+    df = pd.DataFrame({
+        "region": ["USA", "US", "United States", "USA", "US", "Canada"],
+        "amount": [10, 12, 11, 10, 9, 8],
+        "customer_id": [1, 2, 3, 4, 5, 6],
+    })
+    report = analyze_data_quality(df)
+    decisions = report.get("decisions") or []
+    check("has decisions", len(decisions) >= 1, str(decisions))
+    merge_dec = next((d for d in decisions if d.get("type") == "category_merge"), None)
+    check("category merge decision", merge_dec is not None, str(decisions))
+    if merge_dec:
+        check("has options", len(merge_dec.get("options") or []) >= 2)
+        # User confirms merge
+        res = apply_category_merge(df, merge_dec["column"], merge_dec["values"], merge_dec["primary"])
+        check("merge apply success", res["success"], res.get("error", ""))
+        if res["success"]:
+            vals = set(res["dataframe"][merge_dec["column"]].astype(str).unique())
+            # Merged values should collapse to primary (others may remain)
+            check("primary present after merge", merge_dec["primary"] in vals)
+        # Keep separate does not require apply — orchestrator path
+        orch = Orchestrator(get_engine(), "dec1", dataframe=df)
+        orch.quality_report = report
+        keep = orch.apply_decision(merge_dec["id"], "keep")
+        check("keep separate success", keep.get("success"), keep.get("error", ""))
 
 
 def test_ingestion(csv_path: str, label: str):
@@ -495,6 +630,8 @@ def test_ml(df, label: str, query: str):
         check("eda charts", "missing" in result.get("charts", {}))
         check("expanded describe", result.get("eda", {}).get("describe_table") is not None)
         check("summary generated", bool(result.get("summary")))
+        if result.get("task") in ("classification", "regression"):
+            check("automl leaderboard", len(result.get("leaderboard") or []) >= 1)
     return result
 
 
@@ -504,6 +641,9 @@ def test_sql_agent(engine, query: str):
         skip("sql agent", "GROQ_API_KEY not set")
         return None
     result = run_sql_query(query, engine)
+    if _is_rate_limited(result):
+        skip("sql agent", "Groq rate limit")
+        return None
     check("sql success", result["success"], result.get("error", ""))
     if result["success"]:
         check("sql generated", bool(result.get("sql")))
@@ -526,6 +666,9 @@ def test_rag(session_id: str, texts: list[str], questions: list[str]):
             skip(f"rag answer: {q[:40]}", "GROQ_API_KEY not set")
             continue
         result = rag.answer(q)
+        if _is_rate_limited(result):
+            skip(f"rag answer: {q[:40]}", "Groq rate limit")
+            continue
         check(f"rag answer: {q[:40]}", result["success"], result.get("error", ""))
         if result["success"]:
             check(f"  citations for: {q[:30]}", len(result.get("citations", [])) > 0)
@@ -603,6 +746,11 @@ def main():
     test_forecast_agent()
     test_report_agent()
     test_orchestrator_routing()
+    test_phase_h_insights()
+    test_phase_i_automl()
+    test_phase_j_multitable()
+    test_phase_k_business_context()
+    test_phase_l_decisions()
 
     test_full_flow(
         os.path.join(SAMPLE_DIR, "customer_churn.csv"),

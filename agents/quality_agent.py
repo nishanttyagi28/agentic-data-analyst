@@ -78,6 +78,110 @@ def _categorical_inconsistencies(series: pd.Series, threshold: float = 0.75) -> 
     return [{"values": g, "note": "Possible synonyms — review before merging"} for g in groups[:15]]
 
 
+def _id_like_column(col: str, series: pd.Series) -> bool:
+    name = col.lower()
+    if any(k in name for k in ("_id", "id_", "uuid", "key", "code", "sku")) or name == "id":
+        return True
+    if pd.api.types.is_numeric_dtype(series) and series.nunique(dropna=True) >= max(20, int(0.9 * len(series))):
+        return True
+    return False
+
+
+def build_decision_options(df: pd.DataFrame, report: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """
+    Concrete user choices for ambiguous quality findings (never auto-applied).
+    Pass an existing quality report when available; do not call analyze_data_quality here
+    (avoids recursion).
+    """
+    if df is None or df.empty:
+        return []
+    decisions: list[dict[str, Any]] = []
+
+    if report and report.get("categorical_issues"):
+        cat_issues = report.get("categorical_issues") or {}
+    else:
+        cat_issues = {}
+        for col in df.select_dtypes(include=["object", "category", "string"]).columns:
+            groups = _categorical_inconsistencies(df[col])
+            if groups:
+                cat_issues[col] = groups
+    for col, groups in cat_issues.items():
+        vc = df[col].astype(str).value_counts()
+        for gi, g in enumerate(groups[:5]):
+            vals = g.get("values") or []
+            if len(vals) < 2:
+                continue
+            counts = {v: int(vc.get(v, 0)) for v in vals}
+            primary = max(counts, key=counts.get)
+            detail_bits = ", ".join(f"'{v}'×{counts[v]}" for v in vals)
+            decisions.append({
+                "id": f"merge_cat::{col}::{gi}",
+                "type": "category_merge",
+                "column": col,
+                "values": vals,
+                "primary": primary,
+                "counts": counts,
+                "prompt": (
+                    f"In `{col}`, {detail_bits} look like the same category. "
+                    f"Likely merge into '{primary}'?"
+                ),
+                "options": [
+                    {"id": "merge", "label": f"Merge into '{primary}'"},
+                    {"id": "keep", "label": "Keep separate"},
+                    {"id": "show", "label": "Show exact value counts only"},
+                ],
+            })
+
+    # Numeric columns that might be IDs (ambiguous feature use)
+    for col in df.select_dtypes(include=[np.number]).columns:
+        if _id_like_column(col, df[col]) and not any(k in col.lower() for k in ("goal", "price", "amount", "charge", "score", "age", "tenure")):
+            decisions.append({
+                "id": f"id_or_feature::{col}",
+                "type": "id_or_feature",
+                "column": col,
+                "prompt": (
+                    f"`{col}` looks ID-like (high uniqueness / name pattern). "
+                    "Treat as identifier (exclude from ML features) or keep as a numeric feature?"
+                ),
+                "options": [
+                    {"id": "exclude_ml", "label": "Exclude from ML (treat as ID)"},
+                    {"id": "keep_feature", "label": "Keep as feature"},
+                    {"id": "show", "label": "Show sample values"},
+                ],
+            })
+
+    return decisions[:12]
+
+
+def apply_category_merge(
+    df: pd.DataFrame,
+    column: str,
+    values: list[str],
+    primary: str,
+    engine=None,
+    table_name: str = TABLE_NAME,
+) -> dict[str, Any]:
+    """Merge listed category labels into primary — only when user confirms."""
+    if df is None or column not in df.columns:
+        return {"success": False, "error": f"Column {column} not found", "agent": "quality"}
+    cleaned = df.copy()
+    mapping = {v: primary for v in values}
+    cleaned[column] = cleaned[column].astype(str).replace(mapping)
+    log = [f"Merged {values} → '{primary}' in column '{column}'"]
+    if engine is not None:
+        load_dataframe_to_table(cleaned, engine, table_name, if_exists="replace")
+    report = analyze_data_quality(cleaned)
+    return {
+        "success": True,
+        "agent": "quality",
+        "dataframe": cleaned,
+        "actions_log": log,
+        "quality_report": report,
+        "summary": "User-confirmed category merge:\n" + "\n".join(f"- {x}" for x in log),
+        "summary_for_rag": f"Merged categories in {column}: {values} -> {primary}",
+    }
+
+
 def analyze_data_quality(df: pd.DataFrame) -> dict[str, Any]:
     """Profile the dataframe and return a structured quality report."""
     if df is None or df.empty:
@@ -179,7 +283,7 @@ def analyze_data_quality(df: pd.DataFrame) -> dict[str, Any]:
         f"Categorical inconsistencies flagged: {len(cat_issues)}",
     ]
 
-    return {
+    result = {
         "success": True,
         "agent": "quality",
         "row_count": n_rows,
@@ -195,9 +299,11 @@ def analyze_data_quality(df: pd.DataFrame) -> dict[str, Any]:
         "summary": "\n".join(summary_lines),
         "summary_for_rag": "Data Quality Report\n" + "\n".join(summary_lines),
     }
+    result["decisions"] = build_decision_options(df, result)
+    return result
 
 
-def apply_auto_clean(df: pd.DataFrame, engine=None) -> dict[str, Any]:
+def apply_auto_clean(df: pd.DataFrame, engine=None, table_name: str = TABLE_NAME) -> dict[str, Any]:
     """
     Apply safe defaults: drop exact duplicates, median/mode impute, fix numeric dtypes.
     Does NOT remove outliers or merge categories (those need human review).
@@ -237,7 +343,7 @@ def apply_auto_clean(df: pd.DataFrame, engine=None) -> dict[str, Any]:
             log.append(f"Imputed {miss} missing value(s) in '{col}' with mode ({fill})")
 
     if engine is not None:
-        load_dataframe_to_table(cleaned, engine, TABLE_NAME, if_exists="replace")
+        load_dataframe_to_table(cleaned, engine, table_name, if_exists="replace")
 
     report = analyze_data_quality(cleaned)
     return {
@@ -295,6 +401,12 @@ def format_quality_markdown(report: dict[str, Any]) -> str:
         for col, groups in report["categorical_issues"].items():
             for g in groups:
                 lines.append(f"- `{col}`: {', '.join(repr(v) for v in g['values'])}")
+
+    if report.get("decisions"):
+        lines.append("\n**Decisions needed (your call — nothing auto-applied)**")
+        for d in report["decisions"][:6]:
+            lines.append(f"- {d['prompt']}")
+            lines.append("  Options: " + " | ".join(o["label"] for o in d.get("options", [])))
 
     if report.get("suggestions"):
         lines.append("\n**Suggested fixes**")

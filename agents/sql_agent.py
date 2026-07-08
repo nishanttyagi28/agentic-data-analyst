@@ -51,7 +51,8 @@ SQL_SYSTEM_PROMPT = """You are an expert SQLite analyst. Generate ONE correct, c
 
 ## Hard rules
 - Output ONLY the SQL in a ```sql code block (no prose).
-- Table name is always "user_data" (quoted if needed).
+- Use the exact table names from the schema (often "user_data"; multi-table sessions may have several).
+- When multiple tables are listed, JOIN them on the suggested keys (or matching id columns) as needed.
 - Read-only: SELECT or WITH ... SELECT only. No INSERT/UPDATE/DELETE/DROP/DDL.
 - Prefer CTEs (WITH) for multi-step logic; they are allowed and preferred for clarity.
 - Use double quotes for identifiers when names have special characters.
@@ -184,7 +185,12 @@ def extract_sql_from_response(response: str) -> str:
     return response.strip().rstrip(";")
 
 
-def build_schema_context(engine: Engine) -> str:
+def build_schema_context(engine: Engine, tables: dict | None = None) -> str:
+    """Single-table (legacy) or multi-table schema text for the LLM."""
+    if tables and len(tables) > 0:
+        from agents.multitable import build_multi_schema_context
+        return build_multi_schema_context(engine, tables)
+
     schema = get_table_schema(engine, TABLE_NAME)
     if not schema:
         return "No table loaded."
@@ -286,8 +292,9 @@ def generate_sql(
     question: str,
     engine: Engine,
     feedback: str | None = None,
+    tables: dict | None = None,
 ) -> tuple[str | None, str | None]:
-    schema_ctx = build_schema_context(engine)
+    schema_ctx = build_schema_context(engine, tables=tables)
 
     user_prompt = f"""Database schema:
 {schema_ctx}
@@ -317,6 +324,7 @@ Regenerate a COMPLETE SQL query that addresses every issue above while still ans
 def generate_sql_with_self_check(
     question: str,
     engine: Engine,
+    tables: dict | None = None,
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     """
     Generate SQL, rule-check coverage vs the NL request, retry once with feedback if needed.
@@ -330,7 +338,7 @@ def generate_sql_with_self_check(
         "sql_first": None,
     }
 
-    sql, err = generate_sql(question, engine)
+    sql, err = generate_sql(question, engine, tables=tables)
     meta["attempts"] = 1
     if err or not sql:
         return sql, err or "Failed to generate SQL", meta
@@ -345,7 +353,7 @@ def generate_sql_with_self_check(
 
     # One retry with specific mismatch feedback
     feedback = "\n".join(f"- {i}" for i in issues)
-    sql2, err2 = generate_sql(question, engine, feedback=feedback)
+    sql2, err2 = generate_sql(question, engine, feedback=feedback, tables=tables)
     meta["attempts"] = 2
     meta["retried"] = True
     if err2 or not sql2:
@@ -394,9 +402,10 @@ Results (preview):
 def run_sql_query(
     question: str,
     engine: Engine,
+    tables: dict | None = None,
 ) -> dict[str, Any]:
     """Full SQL agent pipeline: generate, self-check/retry, validate, execute, explain."""
-    sql, gen_err, check_meta = generate_sql_with_self_check(question, engine)
+    sql, gen_err, check_meta = generate_sql_with_self_check(question, engine, tables=tables)
     if gen_err:
         return {"success": False, "error": gen_err, "agent": "sql", "self_check": check_meta}
 

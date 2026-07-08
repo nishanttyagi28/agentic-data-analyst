@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# Load .env from project root before any agent imports
 from utils.env import load_project_env
 
 load_project_env()
@@ -16,10 +15,11 @@ import streamlit as st
 
 from agents.ingestion import ingest_csv
 from agents.llm_client import get_groq_client
+from agents.multitable import detect_join_keys, register_dataframe, sanitize_table_name
 from agents.orchestrator import Orchestrator
 from agents.quality_agent import format_quality_markdown
 from agents.report_agent import generate_report
-from db.database import TABLE_NAME, get_engine
+from db.database import TABLE_NAME, get_engine, load_dataframe_to_table
 
 st.set_page_config(
     page_title="Agentic Data Analyst",
@@ -44,6 +44,7 @@ st.markdown("""
     .route-stats { background: #FCE4EC; color: #880E4F; }
     .route-forecast { background: #E8EAF6; color: #283593; }
     .route-report { background: #FFF8E1; color: #F57F17; }
+    .route-insight { background: #E0F2F1; color: #004D40; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -53,6 +54,7 @@ def init_session_state():
         "session_id": str(uuid.uuid4())[:8],
         "engine": None,
         "dataframe": None,
+        "tables": {},
         "orchestrator": None,
         "ingestion_result": None,
         "chat_messages": [],
@@ -61,6 +63,10 @@ def init_session_state():
         "quality_dismissed": False,
         "last_report_html": None,
         "cleaning_log": None,
+        "business_context": "",
+        "insight_suggestions": [],
+        "pending_suggestion": None,
+        "join_suggestions": [],
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -70,52 +76,111 @@ def init_session_state():
 
 
 def route_badge(route: str) -> str:
-    known = ("sql", "ml", "rag", "general", "quality", "stats", "forecast", "report")
+    known = ("sql", "ml", "rag", "general", "quality", "stats", "forecast", "report", "insight")
     css = f"route-{route}" if route in known else "route-general"
     return f'<span class="route-badge {css}">{route.upper()}</span>'
 
 
-def _load_dataframe_into_session(result: dict, upload_key: str) -> None:
+def _sync_orch_context():
+    if st.session_state.orchestrator:
+        st.session_state.orchestrator.set_business_context(st.session_state.business_context)
+
+
+def _load_primary_into_session(result: dict, upload_key: str, replace: bool = True) -> None:
     st.session_state.ingestion_result = result
     st.session_state.dataframe = result["dataframe"]
     st.session_state.data_loaded = True
-    st.session_state.session_id = str(uuid.uuid4())[:8]
+    if replace:
+        st.session_state.session_id = str(uuid.uuid4())[:8]
+        st.session_state.tables = {TABLE_NAME: result["dataframe"]}
+        st.session_state.chat_messages = []
+        st.session_state.insight_suggestions = []
+    else:
+        st.session_state.tables[TABLE_NAME] = result["dataframe"]
+
     st.session_state.orchestrator = Orchestrator(
         st.session_state.engine,
         st.session_state.session_id,
-        st.session_state.dataframe,
+        tables=st.session_state.tables,
+        business_context=st.session_state.business_context,
     )
-    st.session_state.chat_messages = []
     st.session_state.last_upload_key = upload_key
     st.session_state.quality_dismissed = False
     st.session_state.cleaning_log = None
     st.session_state.last_report_html = None
-    # Auto quality scan after ingestion (helpful gate, not a blocker)
     q_report = st.session_state.orchestrator.run_quality_scan()
     st.session_state.quality_report = q_report
     st.session_state.orchestrator.quality_report = q_report
+    # Proactive insights after load (no LLM)
+    ins = st.session_state.orchestrator.suggest_insights()
+    st.session_state.insight_suggestions = ins.get("suggestions") or []
+    st.session_state.join_suggestions = st.session_state.orchestrator.join_suggestions or detect_join_keys(
+        st.session_state.tables
+    )
+
+
+def _add_extra_table(df: pd.DataFrame, name: str) -> dict:
+    if not st.session_state.orchestrator:
+        st.session_state.tables = {}
+        st.session_state.session_id = str(uuid.uuid4())[:8]
+        st.session_state.orchestrator = Orchestrator(
+            st.session_state.engine,
+            st.session_state.session_id,
+            tables={},
+            business_context=st.session_state.business_context,
+        )
+    result = st.session_state.orchestrator.add_table(df, name)
+    if result.get("success"):
+        st.session_state.tables = st.session_state.orchestrator.tables
+        st.session_state.dataframe = st.session_state.orchestrator.dataframe
+        st.session_state.data_loaded = True
+        st.session_state.join_suggestions = st.session_state.orchestrator.join_suggestions
+        if st.session_state.dataframe is not None:
+            q = st.session_state.orchestrator.run_quality_scan()
+            st.session_state.quality_report = q
+    return result
 
 
 def render_sidebar():
     with st.sidebar:
         st.markdown("### 📁 Data Upload")
-        uploaded = st.file_uploader("Upload a CSV file", type=["csv"])
+        uploaded = st.file_uploader("Upload CSV file(s)", type=["csv"], accept_multiple_files=True)
 
         st.markdown("**Or try a sample dataset:**")
         sample_dir = os.path.join(os.path.dirname(__file__), "sample_data")
         samples = [f for f in os.listdir(sample_dir) if f.endswith(".csv")] if os.path.isdir(sample_dir) else []
         selected_sample = st.selectbox("Sample datasets", ["—"] + samples, label_visibility="collapsed")
 
-        if uploaded is not None:
-            file_key = hashlib.md5(uploaded.getvalue()).hexdigest()
+        if uploaded:
+            # Stable key from all file names + sizes
+            key_src = "|".join(f"{f.name}:{len(f.getvalue())}" for f in uploaded)
+            file_key = hashlib.md5(key_src.encode()).hexdigest()
             if st.session_state.get("last_upload_key") != file_key:
                 with st.spinner("Ingesting data..."):
-                    result = ingest_csv(file_bytes=uploaded.getvalue(), engine=st.session_state.engine)
-                    if result["success"]:
-                        _load_dataframe_into_session(result, file_key)
-                        st.success(f"Loaded {result['row_count']} rows, {result['column_count']} columns")
+                    if len(uploaded) == 1:
+                        result = ingest_csv(file_bytes=uploaded[0].getvalue(), engine=st.session_state.engine)
+                        if result["success"]:
+                            _load_primary_into_session(result, file_key, replace=True)
+                            st.success(f"Loaded {result['row_count']} rows as `{TABLE_NAME}`")
+                        else:
+                            st.error(result["error"])
                     else:
-                        st.error(result["error"])
+                        # First file -> user_data, rest -> named tables
+                        first = uploaded[0]
+                        result = ingest_csv(file_bytes=first.getvalue(), engine=st.session_state.engine)
+                        if not result["success"]:
+                            st.error(result["error"])
+                        else:
+                            _load_primary_into_session(result, file_key, replace=True)
+                            for f in uploaded[1:]:
+                                tname = sanitize_table_name(os.path.splitext(f.name)[0])
+                                from io import BytesIO
+                                df = pd.read_csv(BytesIO(f.getvalue()))
+                                r2 = _add_extra_table(df, tname)
+                                if r2.get("success"):
+                                    st.success(f"Loaded `{r2['table_name']}` ({r2['row_count']} rows)")
+                                else:
+                                    st.error(r2.get("error", "Failed to load table"))
 
         elif selected_sample != "—":
             sample_path = os.path.join(sample_dir, selected_sample)
@@ -124,49 +189,60 @@ def render_sidebar():
                 with st.spinner(f"Loading {selected_sample}..."):
                     result = ingest_csv(file_path=sample_path, engine=st.session_state.engine)
                     if result["success"]:
-                        _load_dataframe_into_session(result, sample_key)
+                        _load_primary_into_session(result, sample_key, replace=True)
                         st.success(f"Loaded {result['row_count']} rows")
                     else:
                         st.error(result["error"])
 
         st.markdown("---")
+        st.markdown("### 🏷️ Business context (optional)")
+        ctx = st.text_area(
+            "What's this data about?",
+            value=st.session_state.business_context,
+            placeholder="e.g. Football match-level data for a striker across competitions…",
+            height=80,
+            label_visibility="collapsed",
+        )
+        if ctx != st.session_state.business_context:
+            st.session_state.business_context = ctx
+            _sync_orch_context()
+
+        st.markdown("---")
         st.markdown("### 🧭 What I can help with")
         st.markdown(
             """
-- **SQL queries** — counts, filters, rankings
-- **Data cleaning** — missing values, duplicates, types
-- **EDA** — stats, correlations, distributions
-- **Stats tests** — t-test, ANOVA, correlations, outliers
-- **Forecasting** — trend estimates with uncertainty
-- **ML modeling** — classification, regression, clustering
-- **Reports** — downloadable HTML summary
-- **Follow-ups** — RAG chat on prior findings
+- **SQL** — queries & multi-table joins
+- **Cleaning** — quality + your decisions
+- **Insights** — suggested questions
+- **EDA / AutoML** — multi-model compare
+- **Stats & forecasts**
+- **Reports** — downloadable HTML
+- **Follow-ups** — RAG on prior findings
             """.strip()
         )
 
-        if st.session_state.data_loaded and st.session_state.ingestion_result:
-            result = st.session_state.ingestion_result
+        if st.session_state.data_loaded:
             st.markdown("---")
-            st.markdown("### 📋 Schema")
-            st.markdown(f"**Table:** `{TABLE_NAME}`")
-            st.markdown(f"**Rows:** {len(st.session_state.dataframe) if st.session_state.dataframe is not None else result['row_count']}")
-            st.markdown(f"**Columns:** {result['column_count']}")
-            if st.session_state.quality_report and st.session_state.quality_report.get("quality_score") is not None:
-                st.markdown(f"**Quality score:** {st.session_state.quality_report['quality_score']}/100")
-            with st.expander("Column details"):
-                dtypes = (
-                    {c: str(st.session_state.dataframe[c].dtype) for c in st.session_state.dataframe.columns}
-                    if st.session_state.dataframe is not None
-                    else result.get("dtypes", {})
-                )
-                for col, dtype in dtypes.items():
-                    st.text(f"{col}: {dtype}")
+            st.markdown("### 📋 Tables")
+            for tname, tdf in (st.session_state.tables or {}).items():
+                st.markdown(f"- **`{tname}`**: {len(tdf)} rows × {len(tdf.columns)} cols")
+            if st.session_state.join_suggestions:
+                with st.expander("Likely join keys"):
+                    for j in st.session_state.join_suggestions:
+                        st.caption(j.get("message", str(j)))
 
-            with st.expander("Data preview"):
-                if st.session_state.dataframe is not None:
-                    st.dataframe(st.session_state.dataframe.head(10), use_container_width=True)
-                else:
-                    st.dataframe(pd.DataFrame(result["preview"]), use_container_width=True)
+            if st.session_state.ingestion_result:
+                result = st.session_state.ingestion_result
+                st.markdown(f"**Primary preview table:** `{TABLE_NAME}`")
+                if st.session_state.quality_report and st.session_state.quality_report.get("quality_score") is not None:
+                    st.markdown(f"**Quality score:** {st.session_state.quality_report['quality_score']}/100")
+                with st.expander("Column details"):
+                    if st.session_state.dataframe is not None:
+                        for col in st.session_state.dataframe.columns:
+                            st.text(f"{col}: {st.session_state.dataframe[col].dtype}")
+                with st.expander("Data preview"):
+                    if st.session_state.dataframe is not None:
+                        st.dataframe(st.session_state.dataframe.head(10), use_container_width=True)
 
         if st.session_state.orchestrator:
             stats = st.session_state.orchestrator.rag.get_stats()
@@ -182,7 +258,6 @@ def render_sidebar():
 
 
 def render_quality_gate():
-    """Show data quality card after load; skip-able, not a hard blocker."""
     if not st.session_state.data_loaded:
         return
     if st.session_state.quality_dismissed:
@@ -193,34 +268,60 @@ def render_quality_gate():
 
     with st.container():
         st.markdown("### 🧹 Data Quality Report")
-        st.caption("Review data health before analysis. You can auto-clean with safe defaults or skip and proceed.")
+        st.caption("Review data health. Auto-clean is optional; ambiguous merges need your decision.")
         score = report.get("quality_score", "n/a")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Quality score", f"{score}/100")
         c2.metric("Missing cols", len(report.get("missing") or {}))
         c3.metric("Duplicates", report.get("duplicate_count", 0))
-        c4.metric("Outlier cols", len(report.get("outliers") or {}))
+        c4.metric("Decisions", len(report.get("decisions") or {}))
 
         with st.expander("Full quality details", expanded=score is not None and float(score) < 90):
             st.markdown(format_quality_markdown(report))
 
+        # Phase L — concrete decisions
+        decisions = report.get("decisions") or []
+        if decisions:
+            st.markdown("#### Decisions needed (nothing auto-applied)")
+            for dec in decisions[:6]:
+                st.markdown(f"**{dec['prompt']}**")
+                cols = st.columns(len(dec.get("options") or []) or 1)
+                for i, opt in enumerate(dec.get("options") or []):
+                    if cols[i].button(opt["label"], key=f"dec_{dec['id']}_{opt['id']}"):
+                        with st.spinner("Applying your choice..."):
+                            res = st.session_state.orchestrator.apply_decision(dec["id"], opt["id"])
+                        if res.get("success"):
+                            st.session_state.dataframe = st.session_state.orchestrator.dataframe
+                            st.session_state.tables = st.session_state.orchestrator.tables
+                            if res.get("quality_report"):
+                                st.session_state.quality_report = res["quality_report"]
+                            st.session_state.chat_messages.append({
+                                "role": "assistant",
+                                "route": "quality",
+                                "content": res.get("summary", "Decision recorded."),
+                            })
+                            st.rerun()
+                        else:
+                            st.error(res.get("error", "Failed"))
+
         b1, b2, b3 = st.columns([2, 2, 2])
         with b1:
             if st.button("✨ Auto-clean with defaults", use_container_width=True, type="primary"):
-                with st.spinner("Applying safe defaults (median/mode impute, drop exact duplicates)..."):
+                with st.spinner("Applying safe defaults..."):
                     result = st.session_state.orchestrator.apply_cleaning()
                 if result.get("success"):
                     st.session_state.dataframe = result["dataframe"]
+                    st.session_state.tables = st.session_state.orchestrator.tables
                     st.session_state.quality_report = result.get("quality_report")
-                    st.session_state.orchestrator.set_dataframe(result["dataframe"])
-                    st.session_state.cleaning_log = result.get("actions_log") or []
                     st.session_state.quality_dismissed = True
                     st.session_state.chat_messages.append({
                         "role": "assistant",
                         "route": "quality",
                         "content": result.get("summary", "Auto-clean applied."),
                     })
-                    st.success("Data cleaned. You can continue chatting.")
+                    # Refresh insights after clean
+                    ins = st.session_state.orchestrator.suggest_insights()
+                    st.session_state.insight_suggestions = ins.get("suggestions") or []
                     st.rerun()
                 else:
                     st.error(result.get("error", "Cleaning failed"))
@@ -229,7 +330,35 @@ def render_quality_gate():
                 st.session_state.quality_dismissed = True
                 st.rerun()
         with b3:
-            st.caption("Outliers & category merges are never auto-applied.")
+            st.caption("Category merges only apply when you click an option above.")
+
+
+def render_insights():
+    if not st.session_state.data_loaded:
+        return
+    st.markdown("### 💡 Suggest what to explore")
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        if st.button("Refresh suggestions", use_container_width=True):
+            with st.spinner("Scanning dataset..."):
+                _sync_orch_context()
+                ins = st.session_state.orchestrator.suggest_insights()
+            st.session_state.insight_suggestions = ins.get("suggestions") or []
+            st.rerun()
+    suggestions = st.session_state.insight_suggestions or []
+    if not suggestions and st.session_state.orchestrator:
+        ins = st.session_state.orchestrator.suggest_insights()
+        suggestions = ins.get("suggestions") or []
+        st.session_state.insight_suggestions = suggestions
+
+    if suggestions:
+        st.caption("Click a suggestion to run it through the normal agent pipeline.")
+        for s in suggestions:
+            if st.button(s["label"], key=f"sug_{s['id']}", use_container_width=True):
+                st.session_state.pending_suggestion = s["question"]
+                st.rerun()
+    else:
+        st.caption("No suggestions yet — load data or click Refresh.")
 
 
 def render_report_toolbar():
@@ -284,15 +413,96 @@ def _render_charts(charts: dict):
                 st.plotly_chart(fig, use_container_width=True)
 
 
+def _handle_prompt(prompt: str):
+    st.session_state.chat_messages.append({"role": "user", "content": prompt})
+
+    if not st.session_state.orchestrator:
+        st.session_state.chat_messages.append({
+            "role": "assistant",
+            "content": "Please upload a CSV file or select a sample dataset from the sidebar first.",
+            "route": "general",
+        })
+        st.rerun()
+        return
+
+    _sync_orch_context()
+    with st.spinner("Thinking..."):
+        result = st.session_state.orchestrator.handle_query(prompt)
+
+    if result.get("route") == "quality" and result.get("dataframe") is not None:
+        st.session_state.dataframe = result["dataframe"]
+        st.session_state.tables = st.session_state.orchestrator.tables
+        st.session_state.quality_report = result.get("quality_report") or st.session_state.quality_report
+    if result.get("route") == "quality" and result.get("quality_report"):
+        st.session_state.quality_report = result["quality_report"]
+    if result.get("route") == "report" and result.get("html"):
+        st.session_state.last_report_html = result["html"]
+    if result.get("route") == "insight" and result.get("suggestions"):
+        st.session_state.insight_suggestions = result["suggestions"]
+
+    assistant_msg: dict = {"role": "assistant", "route": result.get("route", "")}
+
+    if not result.get("success"):
+        assistant_msg["content"] = f"❌ {result.get('error', 'An error occurred')}"
+    elif result.get("route") == "sql":
+        assistant_msg["content"] = result.get("explanation", "Query executed.")
+        assistant_msg["sql"] = result.get("sql")
+        if result.get("result") is not None:
+            assistant_msg["result_df"] = result["result"]
+    elif result.get("route") == "ml":
+        assistant_msg["content"] = result.get("summary", "Analysis complete.")
+        assistant_msg["metrics"] = result.get("metrics")
+        assistant_msg["charts"] = result.get("charts")
+        if result.get("leaderboard"):
+            assistant_msg["result_df"] = pd.DataFrame(result["leaderboard"])
+        eda = result.get("eda") or {}
+        if eda.get("describe_table") is not None:
+            assistant_msg["describe_table"] = eda["describe_table"]
+    elif result.get("route") == "stats":
+        assistant_msg["content"] = result.get("summary") or result.get("interpretation", "Stats complete.")
+        if result.get("rankings"):
+            assistant_msg["result_df"] = pd.DataFrame(result["rankings"])
+        if result.get("group_means"):
+            assistant_msg["metrics"] = {
+                **{f"mean_{k}": v for k, v in list(result["group_means"].items())[:3]},
+                "p_value": result.get("p_value"),
+            }
+    elif result.get("route") == "forecast":
+        assistant_msg["content"] = result.get("summary", "Forecast complete.")
+        assistant_msg["charts"] = result.get("charts")
+        assistant_msg["forecast_table"] = result.get("forecast_table")
+    elif result.get("route") == "quality":
+        assistant_msg["content"] = result.get("markdown") or result.get("summary", "Quality check complete.")
+    elif result.get("route") == "insight":
+        lines = [result.get("summary", "Suggestions:")]
+        for s in result.get("suggestions") or []:
+            lines.append(f"- {s['label']}")
+        assistant_msg["content"] = "\n".join(lines)
+        st.session_state.insight_suggestions = result.get("suggestions") or []
+    elif result.get("route") == "report":
+        assistant_msg["content"] = "**Executive Summary**\n\n" + result.get(
+            "executive_summary", result.get("summary", "")
+        )
+        assistant_msg["report_html"] = result.get("html")
+    elif result.get("route") == "rag":
+        assistant_msg["content"] = result.get("answer", "")
+        assistant_msg["citations"] = result.get("citations")
+    else:
+        assistant_msg["content"] = result.get("answer", "")
+
+    st.session_state.chat_messages.append(assistant_msg)
+    st.rerun()
+
+
 def render_chat():
     st.markdown('<p class="main-header">Agentic Data Analyst</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="sub-header">Your AI data analyst — clean data, explore, test, forecast, model, and export reports '
-        'in plain English.</p>',
+        '<p class="sub-header">Your AI data analyst — clean data, explore proactively, model, forecast, join tables, and export reports.</p>',
         unsafe_allow_html=True,
     )
 
     render_quality_gate()
+    render_insights()
     render_report_toolbar()
 
     for msg in st.session_state.chat_messages:
@@ -343,74 +553,15 @@ def render_chat():
                             st.markdown(f"**Source {cite['index']}** ({cite['source_type']})")
                             st.caption(cite["excerpt"])
 
+    # Clicked insight suggestion
+    if st.session_state.pending_suggestion:
+        prompt = st.session_state.pending_suggestion
+        st.session_state.pending_suggestion = None
+        _handle_prompt(prompt)
+        return
+
     if prompt := st.chat_input("Ask about your data..."):
-        st.session_state.chat_messages.append({"role": "user", "content": prompt})
-
-        if not st.session_state.orchestrator:
-            assistant_msg = {
-                "role": "assistant",
-                "content": "Please upload a CSV file or select a sample dataset from the sidebar first.",
-                "route": "general",
-            }
-            st.session_state.chat_messages.append(assistant_msg)
-            st.rerun()
-
-        with st.spinner("Thinking..."):
-            result = st.session_state.orchestrator.handle_query(prompt)
-
-        # Keep quality report / dataframe in sync after clean-via-chat
-        if result.get("route") == "quality" and result.get("dataframe") is not None:
-            st.session_state.dataframe = result["dataframe"]
-            st.session_state.quality_report = result.get("quality_report") or st.session_state.quality_report
-        if result.get("route") == "quality" and result.get("quality_report"):
-            st.session_state.quality_report = result["quality_report"]
-        if result.get("route") == "report" and result.get("html"):
-            st.session_state.last_report_html = result["html"]
-
-        assistant_msg: dict = {"role": "assistant", "route": result.get("route", "")}
-
-        if not result.get("success"):
-            assistant_msg["content"] = f"❌ {result.get('error', 'An error occurred')}"
-        elif result.get("route") == "sql":
-            assistant_msg["content"] = result.get("explanation", "Query executed.")
-            assistant_msg["sql"] = result.get("sql")
-            if result.get("result") is not None:
-                assistant_msg["result_df"] = result["result"]
-        elif result.get("route") == "ml":
-            assistant_msg["content"] = result.get("summary", "Analysis complete.")
-            assistant_msg["metrics"] = result.get("metrics")
-            assistant_msg["charts"] = result.get("charts")
-            eda = result.get("eda") or {}
-            if eda.get("describe_table") is not None:
-                assistant_msg["describe_table"] = eda["describe_table"]
-        elif result.get("route") == "stats":
-            assistant_msg["content"] = result.get("summary") or result.get("interpretation", "Stats complete.")
-            if result.get("rankings"):
-                assistant_msg["result_df"] = pd.DataFrame(result["rankings"])
-            if result.get("group_means"):
-                assistant_msg["metrics"] = {
-                    **{f"mean_{k}": v for k, v in list(result["group_means"].items())[:3]},
-                    "p_value": result.get("p_value"),
-                }
-        elif result.get("route") == "forecast":
-            assistant_msg["content"] = result.get("summary", "Forecast complete.")
-            assistant_msg["charts"] = result.get("charts")
-            assistant_msg["forecast_table"] = result.get("forecast_table")
-        elif result.get("route") == "quality":
-            assistant_msg["content"] = result.get("markdown") or result.get("summary", "Quality check complete.")
-            if result.get("quality_report"):
-                st.session_state.quality_report = result["quality_report"]
-        elif result.get("route") == "report":
-            assistant_msg["content"] = "**Executive Summary**\n\n" + result.get("executive_summary", result.get("summary", ""))
-            assistant_msg["report_html"] = result.get("html")
-        elif result.get("route") == "rag":
-            assistant_msg["content"] = result.get("answer", "")
-            assistant_msg["citations"] = result.get("citations")
-        else:
-            assistant_msg["content"] = result.get("answer", "")
-
-        st.session_state.chat_messages.append(assistant_msg)
-        st.rerun()
+        _handle_prompt(prompt)
 
 
 def main():
