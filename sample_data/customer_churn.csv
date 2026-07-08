@@ -1,0 +1,31 @@
+customer_id,age,tenure_months,monthly_charges,total_charges,contract_type,payment_method,internet_service,churn
+1001,25,12,45.50,546.00,Month-to-month,Electronic,DSL,Yes
+1002,42,36,65.20,2347.20,One year,Mailed check,Fiber optic,No
+1003,35,24,55.00,1320.00,Month-to-month,Credit card,DSL,Yes
+1004,58,48,89.90,4315.20,Two year,Bank transfer,Fiber optic,No
+1005,31,6,42.30,253.80,Month-to-month,Electronic,DSL,Yes
+1006,47,30,72.10,2163.00,One year,Mailed check,Fiber optic,No
+1007,29,18,48.75,877.50,Month-to-month,Credit card,DSL,Yes
+1008,53,42,85.60,3595.20,Two year,Bank transfer,Fiber optic,No
+1009,38,15,58.40,876.00,Month-to-month,Electronic,Fiber optic,Yes
+1010,44,27,68.90,1860.30,One year,Mailed check,DSL,No
+1011,33,9,44.20,397.80,Month-to-month,Credit card,DSL,Yes
+1012,51,39,82.30,3209.70,Two year,Bank transfer,Fiber optic,No
+1013,27,3,39.99,119.97,Month-to-month,Electronic,No,Yes
+1014,46,33,71.50,2359.50,One year,Mailed check,Fiber optic,No
+1015,36,21,52.80,1108.80,Month-to-month,Credit card,DSL,Yes
+1016,55,45,88.00,3960.00,Two year,Bank transfer,Fiber optic,No
+1017,30,8,43.60,348.80,Month-to-month,Electronic,DSL,Yes
+1018,49,36,75.40,2714.40,One year,Mailed check,Fiber optic,No
+1019,41,24,61.20,1468.80,Month-to-month,Credit card,Fiber optic,Yes
+1020,57,51,91.50,4666.50,Two year,Bank transfer,Fiber optic,No
+1021,28,5,41.00,205.00,Month-to-month,Electronic,DSL,Yes
+1022,45,30,69.80,2094.00,One year,Mailed check,DSL,No
+1023,34,12,50.30,603.60,Month-to-month,Credit card,Fiber optic,Yes
+1024,52,40,84.10,3364.00,Two year,Bank transfer,Fiber optic,No
+1025,39,16,57.60,921.60,Month-to-month,Electronic,DSL,Yes
+1026,48,28,73.20,2049.60,One year,Mailed check,Fiber optic,No
+1027,32,10,46.90,469.00,Month-to-month,Credit card,DSL,Yes
+1028,54,44,87.30,3841.20,Two year,Bank transfer,Fiber optic,No
+1029,37,19,54.50,1035.50,Month-to-month,Electronic,Fiber optic,Yes
+1030,43,26,66.70,1734.20,One year,Mailed check,DSL,No
