@@ -48,6 +48,25 @@ def test_sql_safety():
     check("blocks DROP", not is_safe_select("DROP TABLE user_data")[0])
     check("blocks DELETE", not is_safe_select("DELETE FROM user_data")[0])
     check("blocks multi-statement", not is_safe_select("SELECT 1; DROP TABLE user_data")[0])
+    cte_window = (
+        "WITH ranked AS (SELECT sales_person, RANK() OVER "
+        "(PARTITION BY country ORDER BY SUM(amount) DESC) as rnk "
+        "FROM sales GROUP BY sales_person, country) "
+        "SELECT * FROM ranked WHERE rnk <= 2"
+    )
+    check("allows CTE + window functions", is_safe_select(cte_window)[0])
+    check(
+        "blocks chained DROP after SELECT",
+        not is_safe_select("SELECT * FROM sales; DROP TABLE sales;")[0],
+    )
+    check(
+        "allows trailing semicolon only",
+        is_safe_select("SELECT * FROM sales;")[0],
+    )
+    check(
+        "word-boundary: column name with 'update'",
+        is_safe_select("SELECT last_update FROM sales")[0],
+    )
 
 
 def test_ingestion(csv_path: str, label: str):

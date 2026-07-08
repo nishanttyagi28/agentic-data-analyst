@@ -19,7 +19,7 @@ FORBIDDEN_KEYWORDS = re.compile(
 
 
 def is_safe_select(sql: str) -> tuple[bool, str]:
-    """Validate that SQL is a read-only SELECT query."""
+    """Validate that SQL is a read-only SELECT or CTE (WITH ... SELECT) query."""
     if not sql or not sql.strip():
         return False, "Empty SQL query"
 
@@ -29,10 +29,11 @@ def is_safe_select(sql: str) -> tuple[bool, str]:
     cleaned = cleaned.strip()
 
     if FORBIDDEN_KEYWORDS.search(cleaned):
-        return False, "Query contains forbidden keywords (only SELECT is allowed)"
+        return False, "Query contains forbidden keywords (only SELECT/WITH are allowed)"
 
-    if not re.match(r"^\s*SELECT\b", cleaned, re.IGNORECASE):
-        return False, "Only SELECT queries are allowed"
+    # Allow SELECT and CTE (WITH ... SELECT); window functions are fine.
+    if not re.match(r"^\s*(SELECT|WITH)\b", cleaned, re.IGNORECASE):
+        return False, "Only SELECT or WITH (CTE) queries are allowed"
 
     if ";" in cleaned:
         return False, "Multiple statements are not allowed"
