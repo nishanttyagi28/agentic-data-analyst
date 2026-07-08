@@ -165,15 +165,38 @@ class Orchestrator:
         session_id: str,
         dataframe: pd.DataFrame | None = None,
         tables: dict[str, pd.DataFrame] | None = None,
-        business_context: str = "",
+        business_context: str | None = "",
+        **kwargs: Any,
     ):
+        """
+        Parameters
+        ----------
+        engine, session_id
+            Required session wiring.
+        dataframe
+            Optional primary DataFrame (stored as user_data when tables empty).
+        tables
+            Optional multi-table registry {name: DataFrame}.
+        business_context
+            Optional free-text domain description (Phase K). Defaults to "".
+        **kwargs
+            Ignored for forward/backward compatibility with call sites.
+        """
+        # Allow legacy callers that only knew (engine, session_id, dataframe)
+        if "business_context" in kwargs and not business_context:
+            business_context = kwargs.get("business_context") or ""
+
         self.engine = engine
         self.session_id = session_id
         self.tables: dict[str, pd.DataFrame] = dict(tables or {})
-        if dataframe is not None and not self.tables:
-            self.tables[TABLE_NAME] = dataframe
+        if dataframe is not None:
+            if not self.tables:
+                self.tables[TABLE_NAME] = dataframe
+            elif TABLE_NAME not in self.tables:
+                # Keep provided multi-table map; also expose primary under user_data if missing
+                self.tables[TABLE_NAME] = dataframe
         self.dataframe = primary_dataframe(self.tables)
-        self.business_context = business_context or ""
+        self.business_context = (business_context or "").strip()
         self.rag = RAGAgent(session_id)
         self.chat_history: list[dict[str, Any]] = []
         self.quality_report: dict[str, Any] | None = None

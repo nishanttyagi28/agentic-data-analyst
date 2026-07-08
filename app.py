@@ -86,6 +86,51 @@ def _sync_orch_context():
         st.session_state.orchestrator.set_business_context(st.session_state.business_context)
 
 
+def _make_orchestrator(engine, session_id, dataframe=None, tables=None, business_context=""):
+    """
+    Construct Orchestrator matching agents.orchestrator.Orchestrator.__init__.
+    Tries full kwargs first, then degrades for partial deploys, then always
+    applies business_context via setter/attribute so upload never crashes.
+    """
+    ctx = business_context if business_context is not None else ""
+    attempts = [
+        dict(dataframe=dataframe, tables=tables, business_context=ctx),
+        dict(dataframe=dataframe, tables=tables),
+        dict(dataframe=dataframe),
+        {},
+    ]
+    orch = None
+    last_err = None
+    for kwargs in attempts:
+        try:
+            orch = Orchestrator(engine, session_id, **kwargs)
+            break
+        except TypeError as e:
+            last_err = e
+            continue
+    if orch is None:
+        raise TypeError(f"Failed to construct Orchestrator: {last_err}")
+
+    # Ensure multi-table registry if constructor ignored tables=
+    if tables and (not getattr(orch, "tables", None)):
+        orch.tables = dict(tables)
+        if hasattr(orch, "set_dataframe") and dataframe is not None:
+            orch.set_dataframe(dataframe)
+        elif dataframe is not None:
+            orch.dataframe = dataframe
+    elif dataframe is not None and getattr(orch, "dataframe", None) is None:
+        if hasattr(orch, "set_dataframe"):
+            orch.set_dataframe(dataframe)
+        else:
+            orch.dataframe = dataframe
+
+    if hasattr(orch, "set_business_context"):
+        orch.set_business_context(ctx)
+    else:
+        orch.business_context = ctx
+    return orch
+
+
 def _load_primary_into_session(result: dict, upload_key: str, replace: bool = True) -> None:
     st.session_state.ingestion_result = result
     st.session_state.dataframe = result["dataframe"]
@@ -98,11 +143,12 @@ def _load_primary_into_session(result: dict, upload_key: str, replace: bool = Tr
     else:
         st.session_state.tables[TABLE_NAME] = result["dataframe"]
 
-    st.session_state.orchestrator = Orchestrator(
+    st.session_state.orchestrator = _make_orchestrator(
         st.session_state.engine,
         st.session_state.session_id,
+        dataframe=st.session_state.dataframe,
         tables=st.session_state.tables,
-        business_context=st.session_state.business_context,
+        business_context=st.session_state.get("business_context") or "",
     )
     st.session_state.last_upload_key = upload_key
     st.session_state.quality_dismissed = False
@@ -123,11 +169,12 @@ def _add_extra_table(df: pd.DataFrame, name: str) -> dict:
     if not st.session_state.orchestrator:
         st.session_state.tables = {}
         st.session_state.session_id = str(uuid.uuid4())[:8]
-        st.session_state.orchestrator = Orchestrator(
+        st.session_state.orchestrator = _make_orchestrator(
             st.session_state.engine,
             st.session_state.session_id,
+            dataframe=None,
             tables={},
-            business_context=st.session_state.business_context,
+            business_context=st.session_state.get("business_context") or "",
         )
     result = st.session_state.orchestrator.add_table(df, name)
     if result.get("success"):

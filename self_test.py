@@ -579,6 +579,61 @@ def test_phase_k_business_context():
     check("orch context update", orch.business_context == "Updated context")
 
 
+def test_file_upload_orchestrator_construction():
+    """
+    End-to-end style: same construction path as app._load_primary_into_session
+    after CSV ingest — both empty and non-empty business context must work.
+    """
+    print("\n=== File upload path: Orchestrator construction ===")
+    engine = get_engine()
+    # Simulate single-file upload ingest
+    result = ingest_csv(
+        file_path=os.path.join(SAMPLE_DIR, "customer_churn.csv"),
+        engine=engine,
+    )
+    check("upload ingest success", result.get("success"), result.get("error", ""))
+    if not result.get("success"):
+        return
+
+    # Mirror app._make_orchestrator call patterns
+    import app as app_mod
+
+    for ctx, label in (("", "no business context"), ("SaaS churn retention data", "with business context")):
+        try:
+            orch = app_mod._make_orchestrator(
+                engine,
+                f"up_{uuid.uuid4().hex[:6]}",
+                dataframe=result["dataframe"],
+                tables={"user_data": result["dataframe"]},
+                business_context=ctx,
+            )
+            check(f"construct ok ({label})", orch is not None)
+            check(f"has data ({label})", orch.has_data())
+            check(f"context stored ({label})", orch.business_context == ctx.strip())
+            q = orch.run_quality_scan()
+            check(f"quality after upload ({label})", q.get("success"), q.get("error", ""))
+            ins = orch.suggest_insights()
+            check(f"insights after upload ({label})", ins.get("success"), ins.get("error", ""))
+        except TypeError as e:
+            check(f"construct ok ({label})", False, str(e))
+
+    # Direct signature smoke (positional + kwargs combos used in codebase)
+    df = result["dataframe"]
+    combos = [
+        lambda: Orchestrator(engine, "c1", df),
+        lambda: Orchestrator(engine, "c2", dataframe=df),
+        lambda: Orchestrator(engine, "c3", tables={"user_data": df}),
+        lambda: Orchestrator(engine, "c4", dataframe=df, tables={"user_data": df}, business_context=""),
+        lambda: Orchestrator(engine, "c5", dataframe=df, tables={"user_data": df}, business_context="x"),
+    ]
+    for i, fn in enumerate(combos):
+        try:
+            o = fn()
+            check(f"combo {i} ok", o.has_data())
+        except TypeError as e:
+            check(f"combo {i} ok", False, str(e))
+
+
 def test_phase_l_decisions():
     print("\n=== Phase L: Ambiguous decisions ===")
     df = pd.DataFrame({
@@ -750,6 +805,7 @@ def main():
     test_phase_i_automl()
     test_phase_j_multitable()
     test_phase_k_business_context()
+    test_file_upload_orchestrator_construction()
     test_phase_l_decisions()
 
     test_full_flow(
