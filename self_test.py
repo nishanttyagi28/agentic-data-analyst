@@ -13,7 +13,7 @@ load_project_env()
 import numpy as np
 import pandas as pd
 
-from agents.forecast_agent import run_forecast
+from agents.forecast_agent import parse_mixed_dates, run_forecast
 from agents.ingestion import ingest_csv
 from agents.ml_agent import run_eda, run_ml_analysis
 from agents.orchestrator import Orchestrator, classify_query
@@ -174,16 +174,92 @@ def test_forecast_agent():
         check("caveats present", len(result.get("caveats") or []) > 0)
         check("chart present", "forecast" in (result.get("charts") or {}))
         check("summary mentions estimate", "estimate" in result.get("summary", "").lower() or "trend" in result.get("summary", "").lower())
+        # Regular monthly series should keep calendar-style periods when spacing is regular
+        check("nonneg clip for revenue", result.get("nonnegative_clipped") is True)
+        check("lower bound >= 0 for nonneg metric", all(r["lower_95"] >= -1e-9 for r in result["forecast_table"]))
 
     # No date column — synthetic index fallback
     nodate = pd.DataFrame({"sales": [10, 12, 14, 13, 15, 16]})
     r2 = run_forecast(nodate, "forecast next period sales")
     check("forecast without datetime", r2["success"], r2.get("error", ""))
+    if r2["success"]:
+        check("nodate uses event mode", r2.get("event_mode") is True)
+        check("nodate warns user", len(r2.get("warnings") or []) > 0)
+        check("nodate periods are Event+", all(str(r["period"]).startswith("Event") for r in r2["forecast_table"]))
 
     # Sample churn has no dates — should still not crash
     churn = pd.read_csv(os.path.join(SAMPLE_DIR, "customer_churn.csv"))
     r3 = run_forecast(churn, "forecast next month's monthly_charges")
     check("forecast on churn sample", r3["success"], r3.get("error", ""))
+
+    # --- Mixed-format date column (football-style) ---
+    print("\n=== Forecast: mixed-format dates + count clip ===")
+    mixed_dates = [
+        "13/03/2024",
+        "2024-03-20 00:00:00",
+        "27/03/2024",
+        "2024-04-05 00:00:00",
+        "12/04/2024",
+        "2024-04-28 00:00:00",
+        "03/05/2024",
+        "2024-05-18 00:00:00",
+        "01/06/2024",
+        "2024-06-15 00:00:00",
+        "2024-07-03 00:00:00",
+        "20/07/2024",
+    ]
+    goals = [1, 2, 0, 3, 1, 2, 0, 1, 2, 1, 0, 2]
+    foot = pd.DataFrame({"match_date": mixed_dates, "goals": goals})
+
+    parsed, meta = parse_mixed_dates(foot["match_date"])
+    check("mixed parse mostly succeeds", meta["n_parsed"] >= 10, str(meta))
+    check("mixed parse fail_rate low", meta["fail_rate"] <= 0.05, f"fail_rate={meta['fail_rate']}")
+    check("parsed has both March and July", parsed.min().month <= 3 and parsed.max().month >= 7)
+    # Critical: ISO '2024-07-03' must NOT be mangled by dayfirst into 2024-03-07
+    iso_row = foot["match_date"] == "2024-07-03 00:00:00"
+    check(
+        "ISO date not mangled by dayfirst",
+        parsed.loc[iso_row].iloc[0].month == 7 and parsed.loc[iso_row].iloc[0].day == 3,
+        str(parsed.loc[iso_row].iloc[0]),
+    )
+    dmy_row = foot["match_date"] == "13/03/2024"
+    check(
+        "DMY slash date day-first",
+        parsed.loc[dmy_row].iloc[0].month == 3 and parsed.loc[dmy_row].iloc[0].day == 13,
+        str(parsed.loc[dmy_row].iloc[0]),
+    )
+
+    r4 = run_forecast(foot, "forecast goals for next season")
+    check("mixed-date forecast success", r4["success"], r4.get("error", ""))
+    if r4["success"]:
+        check("used real date column", r4.get("date_column") == "match_date")
+        check("irregular/event framing", r4.get("event_mode") is True or r4.get("irregular_spacing") is True)
+        check(
+            "no false calendar precision on periods",
+            all(not str(r["period"]).startswith("2024-") for r in r4["forecast_table"]),
+            str([r["period"] for r in r4["forecast_table"][:3]]),
+        )
+        check("goals lower bound >= 0", all(r["lower_95"] >= -1e-9 for r in r4["forecast_table"]))
+        check("goals point forecast >= 0", all(r["forecast"] >= -1e-9 for r in r4["forecast_table"]))
+        check("nonneg clipped flag", r4.get("nonnegative_clipped") is True)
+        check(
+            "summary mentions event or irregular or warning",
+            any(
+                k in r4.get("summary", "").lower()
+                for k in ("event", "irregular", "not calendar", "clip")
+            ),
+        )
+
+    # Force negative interval without clip would be possible; with low mean goals band can go negative pre-clip
+    # Explicit unit: all-zero-ish nonneg series
+    tiny = pd.DataFrame({
+        "match_date": mixed_dates[:6],
+        "goals": [0, 1, 0, 0, 1, 0],
+    })
+    r5 = run_forecast(tiny, "forecast goals")
+    check("low-count goals forecast", r5["success"], r5.get("error", ""))
+    if r5["success"]:
+        check("low-count lower never negative", all(r["lower_95"] >= -1e-9 for r in r5["forecast_table"]))
 
 
 def test_report_agent():
