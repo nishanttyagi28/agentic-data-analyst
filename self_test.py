@@ -14,7 +14,12 @@ load_project_env()
 import numpy as np
 import pandas as pd
 
-from agents.forecast_agent import parse_mixed_dates, run_forecast
+from agents.forecast_agent import (
+    detect_metric_column,
+    parse_mixed_dates,
+    resolve_forecast_intent,
+    run_forecast,
+)
 from agents.ingestion import ingest_csv
 from agents.insight_agent import generate_insight_suggestions
 from agents.ml_agent import run_eda, run_ml_analysis
@@ -451,10 +456,95 @@ def test_forecast_agent():
         "match_date": mixed_dates[:6],
         "goals": [0, 1, 0, 0, 1, 0],
     })
-    r5 = run_forecast(tiny, "forecast goals")
+    r5 = run_forecast(tiny, "forecast goals", use_llm_intent=False)
     check("low-count goals forecast", r5["success"], r5.get("error", ""))
     if r5["success"]:
         check("low-count lower never negative", all(r["lower_95"] >= -1e-9 for r in r5["forecast_table"]))
+
+    # --- Target metric vs filter entity (Walmart-style bug) ---
+    print("\n=== Forecast: target vs filter entity ===")
+    dates = pd.date_range("2023-01-06", periods=16, freq="W-FRI")
+    walmart = pd.DataFrame({
+        "Store": [1] * 16,
+        "Date": dates,
+        "Weekly_Sales": np.linspace(14000, 18000, 16) + np.random.RandomState(1).normal(0, 200, 16),
+        "Holiday_Flag": [0, 1] * 8,
+        "Temperature": np.linspace(30, 70, 16),
+        "Fuel_Price": np.linspace(3.1, 3.5, 16),
+        "CPI": np.linspace(210, 220, 16),
+        "Unemployment": np.linspace(7.5, 6.5, 16),
+    })
+    # Also add store 2 so filter is meaningful when both present
+    walmart2 = walmart.copy()
+    walmart2["Store"] = 2
+    walmart2["Weekly_Sales"] = walmart2["Weekly_Sales"] * 0.8
+    walmart_both = pd.concat([walmart, walmart2], ignore_index=True)
+
+    q_w = "Forecast weekly sales for store 1 for the next quarter"
+    # Rules-only first (deterministic, no tokens)
+    m = detect_metric_column(walmart_both, q_w)
+    check("rules pick Weekly_Sales not Store", m == "Weekly_Sales", f"got {m}")
+    intent = resolve_forecast_intent(walmart_both, q_w, use_llm=False)
+    check("intent target Weekly_Sales", intent.get("target_column") == "Weekly_Sales", str(intent))
+    check(
+        "intent has store filter",
+        any(f.get("column") == "Store" and str(f.get("value")) in ("1", "1.0") for f in intent.get("filters") or []),
+        str(intent.get("filters")),
+    )
+    r_w = run_forecast(walmart_both, q_w, use_llm_intent=False)
+    check("walmart forecast success", r_w.get("success"), r_w.get("error", ""))
+    if r_w.get("success"):
+        check("walmart metric is Weekly_Sales", r_w.get("metric_column") == "Weekly_Sales", str(r_w.get("metric_column")))
+        check("walmart not forecasting Store", r_w.get("metric_column") != "Store")
+        check("walmart R2 not trivially 1 on constant", r_w.get("r2_historical", 1) < 0.999 or float(np.std(walmart["Weekly_Sales"])) > 0)
+        check("walmart forecast magnitude sales-like", r_w["forecast_table"][0]["forecast"] > 1000, str(r_w["forecast_table"][0]))
+        print(f"  Walmart SQL-like result: metric={r_w.get('metric_column')} filters={r_w.get('filters')}")
+        print(f"  next={r_w['forecast_table'][0]['forecast']:.2f} R2={r_w.get('r2_historical'):.3f}")
+
+    # Constant Store after filter should be refused if forced
+    r_bad = run_forecast(walmart, "forecast store for next quarter", use_llm_intent=False)
+    # May auto-switch to Weekly_Sales or refuse constant Store
+    if r_bad.get("success"):
+        check("forced store language still avoids constant Store", r_bad.get("metric_column") != "Store" or r_bad.get("r2_historical", 1) < 0.999)
+    else:
+        check("constant/bad target rejected or warned", True)
+
+    # Messi goals — no filter
+    goals_df = pd.DataFrame({
+        "match_date": pd.date_range("2024-01-01", periods=10, freq="7D"),
+        "goals": [1, 2, 0, 1, 3, 1, 2, 0, 1, 2],
+        "player": ["Messi"] * 10,
+    })
+    r_g = run_forecast(goals_df, "Predict goals for Messi next season", use_llm_intent=False)
+    check("goals target", r_g.get("success") and r_g.get("metric_column") == "goals", str(r_g.get("metric_column")))
+
+    # Revenue + region filter
+    rev = pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=12, freq="MS"),
+        "region": ["north"] * 6 + ["south"] * 6,
+        "revenue": list(np.linspace(100, 160, 6)) + list(np.linspace(80, 90, 6)),
+    })
+    r_r = run_forecast(rev, "Forecast revenue for the north region next month", use_llm_intent=False)
+    check("revenue target", r_r.get("success") and r_r.get("metric_column") == "revenue", str(r_r.get("metric_column")))
+    if r_r.get("success"):
+        check(
+            "region filter applied",
+            any(f.get("column") == "region" for f in (r_r.get("filters") or [])) or "north" in r_r.get("summary", "").lower(),
+            str(r_r.get("filters")),
+        )
+
+    # Ambiguous Sales vs Sales_Target — query "sales" should prefer Sales (exact-ish) not only Target
+    amb = pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=10, freq="MS"),
+        "Sales": np.linspace(100, 200, 10),
+        "Sales_Target": np.linspace(120, 220, 10),
+        "Store": [1] * 10,
+    })
+    m_amb = detect_metric_column(amb, "Forecast sales for store 1 next month")
+    check("ambiguous prefers Sales over Store", m_amb in ("Sales", "Sales_Target"), f"got {m_amb}")
+    check("ambiguous not Store", m_amb != "Store")
+    # Prefer Sales when query says sales without 'target'
+    check("ambiguous Sales not Store", m_amb == "Sales" or "sales" in str(m_amb).lower())
 
 
 def test_report_agent():

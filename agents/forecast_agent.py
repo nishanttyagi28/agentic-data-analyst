@@ -216,23 +216,385 @@ def detect_datetime_column(df: pd.DataFrame) -> tuple[str | None, dict[str, Any]
     return best_col, best_meta
 
 
-def detect_metric_column(df: pd.DataFrame, query: str = "", exclude: set[str] | None = None) -> str | None:
-    exclude = exclude or set()
+# Measure-like tokens (target) vs dimension-like tokens (usually filters, not targets)
+_METRIC_NAME_HINTS = (
+    "weekly_sales", "sales", "revenue", "goal", "goals", "amount", "price",
+    "charges", "income", "value", "count", "total", "score", "profit", "units",
+    "demand", "volume", "qty", "quantity", "orders",
+)
+_DIMENSION_NAME_HINTS = (
+    "store", "region", "country", "city", "state", "branch", "shop", "id",
+    "flag", "code", "sku", "category", "segment", "dept", "department",
+    "type", "class", "group", "zone", "index",
+)
+# Phrases that introduce a filter entity, not a metric
+_FILTER_CONTEXT_RE = re.compile(
+    r"\b(?:for|in|at|from|within|of)\s+(?:the\s+)?(?P<entity>[a-z_][\w\s]*?)\s+"
+    r"(?P<val>\d+|['\"][^'\"]+['\"]|[A-Za-z][\w\-]*)",
+    re.IGNORECASE,
+)
+
+
+def _norm_token(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _col_tokens(col: str) -> set[str]:
+    raw = re.split(r"[_\s]+", str(col).lower())
+    return {t for t in raw if t} | {_norm_token(col)}
+
+
+def _is_dimension_like(col: str) -> bool:
+    tokens = _col_tokens(col)
+    name = str(col).lower()
+    if any(h in tokens or h in name for h in _DIMENSION_NAME_HINTS):
+        # Exception: sales_target is a metric
+        if any(m in name for m in ("sales", "revenue", "goal", "amount", "price")):
+            return False
+        return True
+    return False
+
+
+def _is_metric_like(col: str) -> bool:
+    name = str(col).lower()
+    tokens = _col_tokens(col)
+    return any(h in name or h in tokens for h in _METRIC_NAME_HINTS)
+
+
+def _query_mentions_column_as_metric(query: str, col: str) -> float:
+    """
+    Score how strongly the query names this column as the *thing to forecast*,
+    not merely as a filter entity (e.g. 'for store 1').
+    """
     q = (query or "").lower()
+    q_norm = _norm_token(q)
+    col_l = str(col).lower()
+    col_space = col_l.replace("_", " ")
+    col_norm = _norm_token(col)
+
+    score = 0.0
+    # Strong: full multi-word name in query ("weekly sales" -> Weekly_Sales)
+    if len(col_space) >= 4 and col_space in q:
+        score += 10.0
+    if len(col_norm) >= 4 and col_norm in q_norm:
+        score += 8.0
+
+    # Metric keyword overlap with query
+    for hint in _METRIC_NAME_HINTS:
+        if hint in col_l or hint in _col_tokens(col):
+            # prefer multi-word forms in query
+            if hint.replace("_", " ") in q or hint in q:
+                score += 6.0 if hint in ("sales", "revenue", "goals", "goal", "weekly_sales") else 4.0
+            else:
+                score += 1.0  # column is metric-like even if not in query
+
+    # Penalize dimension columns mentioned only in filter context
+    if _is_dimension_like(col):
+        score -= 8.0
+        # Extra penalty if "for <col> <value>" pattern
+        for m in _FILTER_CONTEXT_RE.finditer(q):
+            ent = m.group("entity").strip().lower()
+            if col_l in ent or ent in col_l or col_space in ent or any(
+                t in ent for t in _col_tokens(col) if len(t) > 2
+            ):
+                score -= 12.0
+
+    # Short token match like "store" in query is weak and often a filter
+    for tok in _col_tokens(col):
+        if len(tok) <= 2:
+            continue
+        if re.search(rf"\b{re.escape(tok)}\b", q):
+            if _is_dimension_like(col):
+                score += 0.5  # almost ignore
+            else:
+                score += 3.0
+
+    # Prefer higher-variance measure names when both match
+    if _is_metric_like(col) and not _is_dimension_like(col):
+        score += 2.0
+
+    return score
+
+
+def detect_metric_column(df: pd.DataFrame, query: str = "", exclude: set[str] | None = None) -> str | None:
+    """
+    Choose the numeric measure to forecast. Prefer metric-like columns
+    (sales/revenue/goals) over dimension/ID columns (store/region) even when
+    the query mentions the dimension as a filter ('for store 1').
+    """
+    exclude = exclude or set()
     nums = [c for c in df.select_dtypes(include=[np.number]).columns if c not in exclude]
     if not nums:
+        # allow non-numeric that are metric-named after coercion
+        nums = [c for c in df.columns if c not in exclude and _is_metric_like(c)]
+    if not nums:
         return None
-    for col in nums:
-        if col.lower() in q or col.lower().replace("_", " ") in q:
-            return col
-    for kw in (
-        "goal", "revenue", "sales", "amount", "price", "charges",
-        "income", "value", "count", "total", "score",
-    ):
-        for col in nums:
-            if kw in col.lower():
-                return col
-    return nums[0]
+
+    scored = [(col, _query_mentions_column_as_metric(query, col)) for col in nums]
+    scored.sort(key=lambda x: (x[1], _is_metric_like(x[0]), -int(_is_dimension_like(x[0]))), reverse=True)
+
+    best_col, best_score = scored[0]
+    # If best is still dimension-like and a metric-like column exists, prefer metric
+    if _is_dimension_like(best_col):
+        metric_candidates = [c for c in nums if _is_metric_like(c) and not _is_dimension_like(c)]
+        if metric_candidates:
+            # re-score metric-only
+            metric_scored = [(c, _query_mentions_column_as_metric(query, c)) for c in metric_candidates]
+            metric_scored.sort(key=lambda x: x[1], reverse=True)
+            if metric_scored[0][1] >= best_score - 5 or best_score < 5:
+                return metric_scored[0][0]
+
+    # Default: first among metric-like if nothing scored well
+    if best_score < 2.0:
+        for c in nums:
+            if _is_metric_like(c) and not _is_dimension_like(c):
+                return c
+        # fall back to highest variance numeric (not constant ID)
+        variances = []
+        for c in nums:
+            s = pd.to_numeric(df[c], errors="coerce")
+            variances.append((c, float(s.var()) if s.notna().sum() > 1 else 0.0))
+        variances.sort(key=lambda x: x[1], reverse=True)
+        if variances and variances[0][1] > 0:
+            return variances[0][0]
+    return best_col
+
+
+def _cast_filter_value(series: pd.Series, val: Any) -> Any:
+    if pd.api.types.is_numeric_dtype(series):
+        try:
+            return int(val) if str(val).isdigit() else float(val)
+        except ValueError:
+            return val
+    return val
+
+
+def parse_filters_from_query(df: pd.DataFrame, query: str) -> list[dict[str, Any]]:
+    """
+    Lightweight rule-based filters:
+      - 'for store 1'           → Store = 1
+      - 'for the north region'  → region = north
+      - 'for region north'      → region = north
+    Returns list of {column, op, value}.
+    """
+    q = query or ""
+    filters: list[dict[str, Any]] = []
+    q_lower = q.lower()
+
+    dim_cols = [
+        c for c in df.columns
+        if _is_dimension_like(c) or (
+            not _is_metric_like(c)
+            and not pd.api.types.is_datetime64_any_dtype(df[c])
+            and df[c].nunique(dropna=True) <= max(50, len(df) // 2 + 1)
+        )
+    ]
+
+    for col in dim_cols:
+        col_l = str(col).lower()
+        col_space = col_l.replace("_", " ")
+        # Pattern A: for <column> <value>   e.g. for store 1
+        m_a = re.search(
+            rf"\b(?:for|in|at)\s+(?:the\s+)?{re.escape(col_l)}\s+(\d+|['\"][^'\"]+['\"]|[A-Za-z][\w\-]*)",
+            q_lower,
+            re.IGNORECASE,
+        )
+        if not m_a and col_space != col_l:
+            m_a = re.search(
+                rf"\b(?:for|in|at)\s+(?:the\s+)?{re.escape(col_space)}\s+(\d+|['\"][^'\"]+['\"]|[A-Za-z][\w\-]*)",
+                q_lower,
+                re.IGNORECASE,
+            )
+        # Pattern B: for [the] <value> <column>  e.g. for the north region
+        m_b = re.search(
+            rf"\b(?:for|in|at)\s+(?:the\s+)?([A-Za-z][\w\-]*)\s+{re.escape(col_l)}\b",
+            q_lower,
+            re.IGNORECASE,
+        )
+        if not m_b and col_space != col_l:
+            m_b = re.search(
+                rf"\b(?:for|in|at)\s+(?:the\s+)?([A-Za-z][\w\-]*)\s+{re.escape(col_space)}\b",
+                q_lower,
+                re.IGNORECASE,
+            )
+
+        val = None
+        if m_a:
+            val = m_a.group(1).strip().strip("'\"")
+            # skip if value is a time word (next month) not a real filter
+            if val.lower() in ("next", "last", "this", "the", "a", "an"):
+                val = None
+        if val is None and m_b:
+            val = m_b.group(1).strip().strip("'\"")
+            if val.lower() in ("next", "last", "this", "the", "a", "an", "for"):
+                val = None
+        if val is None:
+            continue
+        # Skip if "value" is actually another column name
+        if any(val.lower() == str(c).lower() for c in df.columns):
+            continue
+        cast_val = _cast_filter_value(df[col], val)
+        filters.append({"column": col, "op": "=", "value": cast_val})
+
+    # De-dupe by column (last wins)
+    by_col = {f["column"]: f for f in filters}
+    return list(by_col.values())
+
+
+def resolve_forecast_intent(
+    df: pd.DataFrame,
+    query: str = "",
+    exclude: set[str] | None = None,
+    use_llm: bool = True,
+) -> dict[str, Any]:
+    """
+    Resolve {target_column, filters} from NL + schema.
+    Prefer LLM structured extraction when available; always fall back to rules.
+    """
+    exclude = exclude or set()
+    schema_lines = []
+    for c in df.columns:
+        dtype = str(df[c].dtype)
+        nuniq = int(df[c].nunique(dropna=True))
+        sample = df[c].dropna().astype(str).head(3).tolist()
+        schema_lines.append(f"- {c} ({dtype}, nunique={nuniq}, sample={sample})")
+
+    rule_metric = detect_metric_column(df, query, exclude=exclude)
+    rule_filters = parse_filters_from_query(df, query)
+    # Never filter on the target metric column
+    rule_filters = [f for f in rule_filters if f["column"] != rule_metric]
+
+    result = {
+        "target_column": rule_metric,
+        "filters": rule_filters,
+        "source": "rules",
+        "raw_llm": None,
+    }
+
+    if not use_llm or not (query or "").strip():
+        return result
+
+    try:
+        from agents.llm_client import chat_completion
+        import json
+
+        prompt = f"""You extract forecast intent from a user question and a table schema.
+Return JSON ONLY:
+{{"target_column": "<exact column name to forecast>", "filters": [{{"column": "<col>", "op": "=", "value": "<value>"}}]}}
+
+Rules:
+- target_column must be the METRIC/MEASURE (e.g. Weekly_Sales, revenue, goals), NEVER a filter dimension like Store, Region, ID.
+- Mentions like "for store 1" or "for the north region" are FILTERS, not targets.
+- Use exact column names from the schema.
+- filters may be empty.
+
+Schema:
+{chr(10).join(schema_lines)}
+
+User question: {query}
+"""
+        text, err = chat_completion(
+            [
+                {"role": "system", "content": "You map NL forecast requests to target_column + filters. JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=256,
+        )
+        if err or not text:
+            return result
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return result
+        data = json.loads(match.group())
+        target = data.get("target_column")
+        filters = data.get("filters") or []
+        valid_cols = set(df.columns)
+        if target in valid_cols and target not in exclude:
+            # Guard: reject dimension-only targets if a better metric exists
+            if _is_dimension_like(target) and not _is_metric_like(target):
+                metric_alt = detect_metric_column(df, query, exclude=exclude | {target})
+                if metric_alt:
+                    target = metric_alt
+            result["target_column"] = target
+            result["source"] = "llm+rules"
+        cleaned = []
+        for f in filters:
+            col = f.get("column")
+            if col not in valid_cols or col == result["target_column"]:
+                continue
+            cleaned.append({
+                "column": col,
+                "op": f.get("op") or "=",
+                "value": f.get("value"),
+            })
+        # Merge rule filters if LLM omitted them
+        if not cleaned and rule_filters:
+            cleaned = rule_filters
+        result["filters"] = cleaned
+        result["raw_llm"] = data
+    except Exception:
+        return result
+    return result
+
+
+def apply_forecast_filters(df: pd.DataFrame, filters: list[dict[str, Any]]) -> tuple[pd.DataFrame, list[str]]:
+    """Apply simple equality filters; return filtered df + human notes."""
+    if df is None or df.empty or not filters:
+        return df, []
+    work = df.copy()
+    notes = []
+    for f in filters:
+        col = f.get("column")
+        if col not in work.columns:
+            continue
+        val = f.get("value")
+        before = len(work)
+        series = work[col]
+        if pd.api.types.is_numeric_dtype(series):
+            try:
+                val_num = pd.to_numeric(val, errors="coerce")
+                mask = series == val_num if pd.notna(val_num) else series.astype(str) == str(val)
+            except Exception:
+                mask = series.astype(str).str.lower() == str(val).lower()
+        else:
+            mask = series.astype(str).str.lower() == str(val).lower()
+            # also try contains for region names
+            if mask.sum() == 0:
+                mask = series.astype(str).str.lower().str.contains(str(val).lower(), na=False)
+        work = work.loc[mask]
+        notes.append(f"Filter `{col}` = {val!r} ({before} → {len(work)} rows)")
+    return work, notes
+
+
+def low_variance_metric_warning(series: pd.Series, col: str) -> str | None:
+    """
+    Safety net: constant / near-constant targets (IDs, store numbers after filter)
+    produce meaningless perfect R² forecasts.
+    """
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if len(s) < 2:
+        return (
+            f"The column `{col}` has too few numeric values after filtering to forecast reliably. "
+            "Did you mean a different metric column?"
+        )
+    nuniq = int(s.nunique())
+    std = float(s.std()) if len(s) > 1 else 0.0
+    mean_abs = float(np.mean(np.abs(s))) if len(s) else 0.0
+    if nuniq <= 1 or std == 0.0:
+        return (
+            f"The column `{col}` has very little variation in this filtered data "
+            f"(unique values={nuniq}, std=0) — unusual for a forecast target "
+            "(often an ID/category like Store after filtering). "
+            "Did you mean to forecast a different column such as Weekly_Sales / revenue / goals?"
+        )
+    if nuniq <= 3 and mean_abs > 0 and std / mean_abs < 0.01:
+        return (
+            f"The column `{col}` is nearly constant after filtering "
+            f"(nunique={nuniq}, CV≈{std / mean_abs:.4f}). "
+            "This is unusual for a forecast target — did you mean a different metric column?"
+        )
+    return None
 
 
 def _horizon_from_query(query: str, freq_days: float, irregular: bool) -> int:
@@ -284,7 +646,12 @@ def _is_irregular_spacing(deltas_days: np.ndarray) -> bool:
     return cv >= IRREGULAR_GAP_CV_THRESHOLD
 
 
-def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) -> dict[str, Any]:
+def run_forecast(
+    df: pd.DataFrame,
+    query: str = "",
+    horizon: int | None = None,
+    use_llm_intent: bool = True,
+) -> dict[str, Any]:
     """
     Linear-trend forecast on a datetime + numeric series.
     Returns point forecast + approximate 95% prediction band from residual std.
@@ -298,15 +665,68 @@ def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) 
     irregular = False
     event_mode = False
 
+    # --- Resolve target metric + filters (not naive first-column-name-in-query) ---
+    intent = resolve_forecast_intent(
+        df,
+        query,
+        exclude={date_col} if date_col else set(),
+        use_llm=use_llm_intent,
+    )
+    metric = intent.get("target_column")
+    filters = intent.get("filters") or []
+    filtered_df, filter_notes = apply_forecast_filters(df, filters)
+    warnings.extend(filter_notes)
+
+    if metric is None:
+        return {
+            "success": False,
+            "error": "No numeric metric found to forecast",
+            "agent": "forecast",
+            "intent": intent,
+        }
+
+    if filtered_df is None or filtered_df.empty:
+        return {
+            "success": False,
+            "error": (
+                f"No rows left after applying filters {filters}. "
+                "Check that the filter values exist in the data."
+            ),
+            "agent": "forecast",
+            "intent": intent,
+            "warnings": warnings,
+        }
+
+    # Safety net: wrong target often shows up as near-constant series after filter
+    if metric in filtered_df.columns:
+        lv = low_variance_metric_warning(filtered_df[metric], metric)
+        if lv:
+            # Try to auto-recover to a better metric once
+            alt = detect_metric_column(
+                filtered_df,
+                query,
+                exclude={metric, date_col} if date_col else {metric},
+            )
+            if alt and alt != metric:
+                warnings.append(
+                    f"Auto-switched forecast target from `{metric}` → `{alt}` because `{metric}` "
+                    "had little/no variation (likely a filter/ID column, not a measure)."
+                )
+                metric = alt
+                lv = low_variance_metric_warning(filtered_df[metric], metric)
+            if lv:
+                return {
+                    "success": False,
+                    "error": lv,
+                    "agent": "forecast",
+                    "metric_column": metric,
+                    "intent": intent,
+                    "warnings": warnings,
+                    "summary": f"⚠️ {lv}",
+                }
+
     if date_col is None:
-        metric = detect_metric_column(df, query)
-        if metric is None:
-            return {
-                "success": False,
-                "error": "No date/time column and no numeric metric found for forecasting",
-                "agent": "forecast",
-            }
-        work = df[[metric]].copy()
+        work = filtered_df[[metric]].copy()
         work[metric] = pd.to_numeric(work[metric], errors="coerce")
         work = work.dropna()
         if len(work) < 3:
@@ -323,11 +743,7 @@ def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) 
         )
         parse_meta = None
     else:
-        metric = detect_metric_column(df, query, exclude={date_col})
-        if metric is None:
-            return {"success": False, "error": "No numeric metric found to forecast", "agent": "forecast"}
-
-        work = df[[date_col, metric]].copy()
+        work = filtered_df[[date_col, metric]].copy()
         parsed_dates, col_meta = parse_mixed_dates(work[date_col])
         parse_meta = col_meta
         work[date_col] = parsed_dates
@@ -483,6 +899,24 @@ def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) 
         fig.update_yaxes(rangemode="tozero")
 
     r2 = float(model.score(X, y))
+    # Final guard: perfect R² on near-constant y is almost always wrong target
+    if r2 >= 0.999 and float(np.std(y)) < 1e-9:
+        return {
+            "success": False,
+            "error": (
+                f"The column `{metric}` is constant after filtering (R² would be trivially 1.0). "
+                "This is almost never a valid forecast target — did you mean Weekly_Sales / revenue / goals?"
+            ),
+            "agent": "forecast",
+            "metric_column": metric,
+            "intent": intent,
+            "warnings": warnings,
+            "summary": (
+                f"⚠️ Refused to forecast constant column `{metric}`. "
+                "Pick a real measure (e.g. Weekly_Sales), not a filter/ID field."
+            ),
+        }
+
     forecast_rows = [
         {
             "period": future_labels[i],
@@ -516,12 +950,17 @@ def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) 
         if event_mode
         else f"next {n_ahead} period(s)"
     )
+    filter_desc = ""
+    if filters:
+        filter_desc = " filtered by " + ", ".join(
+            f"`{f['column']}`={f['value']!r}" for f in filters
+        )
     warn_block = ""
     if warnings:
-        warn_block = "\n\n**Parsing / timeline notes:**\n" + "\n".join(f"- ⚠️ {w}" for w in warnings)
+        warn_block = "\n\n**Notes:**\n" + "\n".join(f"- ⚠️ {w}" for w in warnings)
 
     summary = (
-        f"Forecast for **{metric}** over the {framing} using a linear trend "
+        f"Forecast for **{metric}**{filter_desc} over the {framing} using a linear trend "
         f"(R² on history = {r2:.3f}).\n\n"
         f"Next point estimate: **{pred[0]:.3g}** "
         f"(approx. range {lower[0]:.3g} – {upper[0]:.3g})."
@@ -533,6 +972,8 @@ def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) 
         "success": True,
         "agent": "forecast",
         "metric_column": metric,
+        "filters": filters,
+        "intent": intent,
         "date_column": None if use_synthetic else date_col,
         "horizon": n_ahead,
         "r2_historical": r2,
@@ -546,7 +987,7 @@ def run_forecast(df: pd.DataFrame, query: str = "", horizon: int | None = None) 
         "nonnegative_clipped": nonneg,
         "summary": summary,
         "summary_for_rag": (
-            f"Forecast of {metric}, horizon={n_ahead}, next={pred[0]:.4g}, "
+            f"Forecast of {metric}{filter_desc}, horizon={n_ahead}, next={pred[0]:.4g}, "
             f"range=[{lower[0]:.4g}, {upper[0]:.4g}], R2={r2:.3f}, event_mode={event_mode}. "
             + " ".join(caveats)
         ),
