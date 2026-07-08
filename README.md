@@ -7,6 +7,8 @@
 
 Upload a CSV, ask questions in plain English, and get SQL answers, automated ML analysis, and RAG-powered follow-ups — all from a single chat interface.
 
+**Live Demo:** [https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/)
+
 ## Business Problem & Solution
 
 ### The problem
@@ -126,6 +128,9 @@ flowchart TB
 ---
 
 ## Quick Start
+
+**Try it live (no setup needed):** [agentic-data-analyst on Streamlit Cloud](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/) — pick a sample dataset from the sidebar and start chatting.  
+**Or run locally:** follow the steps below.
 
 ### Prerequisites
 
