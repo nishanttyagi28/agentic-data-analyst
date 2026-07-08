@@ -1,6 +1,7 @@
 """End-to-end self-test for Agentic Data Analyst."""
 
 import os
+import re
 import sys
 import uuid
 
@@ -20,9 +21,13 @@ from agents.orchestrator import Orchestrator, classify_query
 from agents.quality_agent import analyze_data_quality, apply_auto_clean, format_quality_markdown
 from agents.rag_agent import RAGAgent
 from agents.report_agent import generate_report
-from agents.sql_agent import is_safe_select, run_sql_query
+from agents.sql_agent import (
+    check_sql_covers_request,
+    is_safe_select,
+    run_sql_query,
+)
 from agents.stats_agent import run_stats_analysis
-from db.database import get_engine
+from db.database import get_engine, load_dataframe_to_table
 
 SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "sample_data")
 HAS_API_KEY = bool(get_groq_api_key())
@@ -74,6 +79,180 @@ def test_sql_safety():
         "word-boundary: column name with 'update'",
         is_safe_select("SELECT last_update FROM sales")[0],
     )
+
+
+def test_sql_self_check_rules():
+    print("\n=== SQL Self-Check Rules ===")
+    q_top = (
+        "For each season, show the top 3 competitions by average goals per match, "
+        "only for seasons with more than 20 matches"
+    )
+    bad_sql = (
+        'SELECT season, competition, AVG(goals) AS avg_goals '
+        'FROM "user_data" GROUP BY season, competition'
+    )
+    issues = check_sql_covers_request(q_top, bad_sql)
+    check("flags missing window for top-N-per-group", any("window" in i.lower() or "rank" in i.lower() for i in issues), str(issues))
+    check("flags missing aggregate threshold", any("having" in i.lower() or "threshold" in i.lower() or "aggregate" in i.lower() for i in issues), str(issues))
+
+    good_sql = """
+    WITH season_ok AS (
+      SELECT season FROM "user_data" GROUP BY season HAVING COUNT(*) > 20
+    ),
+    comp_stats AS (
+      SELECT u.season, u.competition, AVG(u.goals) AS avg_goals
+      FROM "user_data" u INNER JOIN season_ok s ON u.season = s.season
+      GROUP BY u.season, u.competition
+    ),
+    ranked AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY season ORDER BY avg_goals DESC) AS rnk
+      FROM comp_stats
+    )
+    SELECT * FROM ranked WHERE rnk <= 3
+    """
+    issues_good = check_sql_covers_request(q_top, good_sql)
+    check("accepts correct multi-clause SQL", len(issues_good) == 0, str(issues_good))
+
+    q_pct = "What percentage of total revenue does each region contribute?"
+    issues_pct = check_sql_covers_request(q_pct, 'SELECT region, SUM(revenue) FROM "user_data" GROUP BY region')
+    check("flags missing pct-of-total", len(issues_pct) > 0, str(issues_pct))
+
+
+def _messi_style_dataframe() -> pd.DataFrame:
+    """Synthetic football match rows: season, competition, goals (messi_matches-style)."""
+    rows = []
+    # Season A: 25 matches across 4 competitions — qualifies for >20
+    comps_a = ["La Liga"] * 10 + ["UCL"] * 8 + ["Copa"] * 5 + ["Friendly"] * 2
+    goals_a = [2, 1, 3, 0, 2, 1, 4, 2, 1, 0, 3, 2, 1, 2, 0, 1, 2, 3, 1, 0, 2, 1, 0, 1, 2]
+    for i, (c, g) in enumerate(zip(comps_a, goals_a)):
+        rows.append({"season": "2022/23", "competition": c, "goals": g, "match_id": f"a{i}"})
+    # Season B: 22 matches — qualifies
+    comps_b = ["La Liga"] * 9 + ["UCL"] * 7 + ["Copa"] * 4 + ["Supercup"] * 2
+    goals_b = [1, 0, 2, 1, 3, 2, 1, 0, 1, 2, 3, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 1]
+    for i, (c, g) in enumerate(zip(comps_b, goals_b)):
+        rows.append({"season": "2023/24", "competition": c, "goals": g, "match_id": f"b{i}"})
+    # Season C: only 8 matches — must be EXCLUDED by >20 filter
+    for i in range(8):
+        rows.append({
+            "season": "2021/22",
+            "competition": "La Liga" if i < 5 else "UCL",
+            "goals": i % 3,
+            "match_id": f"c{i}",
+        })
+    return pd.DataFrame(rows)
+
+
+def test_sql_multi_clause_generation():
+    print("\n=== SQL Multi-Clause Generation (LLM) ===")
+    if not HAS_API_KEY:
+        skip("multi-clause SQL generation", "GROQ_API_KEY not set")
+        return
+
+    engine = get_engine()
+    df = _messi_style_dataframe()
+    load_dataframe_to_table(df, engine)
+
+    # Pattern 1: top N per group
+    q1 = "For each season, show the top 2 competitions by average goals per match, ranked within season"
+    r1 = run_sql_query(q1, engine)
+    check("top-N-per-group success", r1.get("success"), r1.get("error", ""))
+    if r1.get("success"):
+        sql1 = r1.get("sql") or ""
+        print(f"  SQL[top-N]: {sql1[:300]}...")
+        check("top-N has window", bool(re.search(r"ROW_NUMBER|RANK|DENSE_RANK|OVER\s*\(", sql1, re.I)), sql1[:200])
+        check("top-N has partition", "PARTITION" in sql1.upper(), sql1[:200])
+        res1 = r1["result"]
+        check("top-N returned rows", len(res1) > 0)
+        # At most 2 rows per season
+        if "season" in res1.columns:
+            max_per = res1.groupby("season").size().max()
+            check("top-N max 2 per season", int(max_per) <= 2, f"max_per={max_per}")
+
+    # Pattern 2: HAVING aggregate threshold
+    q2 = "Which seasons have more than 20 matches?"
+    r2 = run_sql_query(q2, engine)
+    check("HAVING query success", r2.get("success"), r2.get("error", ""))
+    if r2.get("success"):
+        sql2 = r2.get("sql") or ""
+        print(f"  SQL[HAVING]: {sql2[:300]}...")
+        check("HAS HAVING or count filter", bool(re.search(r"HAVING|COUNT\s*\(", sql2, re.I)), sql2[:200])
+        res2 = r2["result"]
+        seasons = set()
+        for col in res2.columns:
+            if "season" in col.lower():
+                seasons = set(res2[col].astype(str).tolist())
+                break
+        check("excludes short season 2021/22", "2021/22" not in seasons, str(seasons))
+        check("includes long seasons", "2022/23" in seasons or "2023/24" in seasons, str(seasons))
+
+    # Pattern 3: percentage of total
+    q3 = "What percentage of total goals does each competition contribute?"
+    r3 = run_sql_query(q3, engine)
+    check("pct-of-total success", r3.get("success"), r3.get("error", ""))
+    if r3.get("success"):
+        sql3 = r3.get("sql") or ""
+        print(f"  SQL[pct]: {sql3[:300]}...")
+        check(
+            "pct uses window or total divisor",
+            bool(re.search(r"OVER\s*\(|/\s*\(|100", sql3, re.I)),
+            sql3[:200],
+        )
+        res3 = r3["result"]
+        check("pct returned rows", len(res3) > 0)
+
+    # Pattern 4: FULL multi-clause (original failing example)
+    q4 = (
+        "For each season, show the top 3 competitions by average goals per match, "
+        "ranked within season, only for seasons with more than 20 matches"
+    )
+    r4 = run_sql_query(q4, engine)
+    check("multi-clause success", r4.get("success"), r4.get("error", ""))
+    if r4.get("success"):
+        sql4 = r4.get("sql") or ""
+        print(f"  SQL[multi]:\n{sql4}")
+        check("multi has window", bool(re.search(r"ROW_NUMBER|RANK|DENSE_RANK", sql4, re.I)), sql4[:250])
+        check("multi has PARTITION BY", "PARTITION" in sql4.upper(), sql4[:250])
+        check(
+            "multi has season threshold",
+            bool(re.search(r"HAVING|COUNT\s*\(|\b>\s*20\b|\b>=\s*20\b", sql4, re.I)),
+            sql4[:250],
+        )
+        check(
+            "multi filters rank",
+            bool(re.search(r"<=\s*3|\bLIMIT\b", sql4, re.I)) or "rnk" in sql4.lower() or "rank" in sql4.lower(),
+            sql4[:250],
+        )
+        res4 = r4["result"]
+        check("multi returned data", len(res4) > 0, "empty result")
+        # Must not include short season
+        if "season" in res4.columns:
+            seasons4 = set(res4["season"].astype(str).tolist())
+            check("multi excludes 2021/22", "2021/22" not in seasons4, str(seasons4))
+            max_per4 = res4.groupby("season").size().max()
+            check("multi max 3 comps per season", int(max_per4) <= 3, f"max_per={max_per4}")
+        residual = (r4.get("self_check") or {}).get("issues_final") or []
+        check("multi self-check clean or minor", len(residual) == 0, str(residual))
+
+    # Sample dataset regression — simple + top-style
+    churn_path = os.path.join(SAMPLE_DIR, "customer_churn.csv")
+    from agents.ingestion import ingest_csv as _ingest
+    ing = _ingest(file_path=churn_path, engine=engine)
+    check("reload churn for sql", ing.get("success"), ing.get("error", ""))
+    if ing.get("success"):
+        r5 = run_sql_query("How many customers churned?", engine)
+        check("simple churn count still works", r5.get("success"), r5.get("error", ""))
+        r6 = run_sql_query(
+            "For each contract_type, show the top 1 internet_service by average monthly_charges, ranked within contract_type",
+            engine,
+        )
+        check("churn top-N-per-group success", r6.get("success"), r6.get("error", ""))
+        if r6.get("success"):
+            sql6 = r6.get("sql") or ""
+            check(
+                "churn top-N uses window",
+                bool(re.search(r"ROW_NUMBER|RANK|OVER\s*\(", sql6, re.I)),
+                sql6[:200],
+            )
 
 
 def test_quality_agent():
@@ -416,6 +595,8 @@ def main():
     print(f"GROQ_API_KEY set: {HAS_API_KEY}")
 
     test_sql_safety()
+    test_sql_self_check_rules()
+    test_sql_multi_clause_generation()
     test_quality_agent()
     test_expanded_eda()
     test_stats_agent()
