@@ -18,7 +18,7 @@
 
 ## SQL Agent
 
-7. **SELECT-only regex guard** — Blocks INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE and multi-statement queries before execution. Defense-in-depth beyond LLM prompting.
+7. **SELECT/CTE-only regex guard** — Blocks INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE and multi-statement queries before execution. Allows `WITH` (CTE) and window functions. Word-boundary matching avoids false positives on column names like `last_update`.
 
 8. **Double-quoted identifiers** — Prompt instructs LLM to quote table/column names for SQLite compatibility with cleaned column names.
 
@@ -38,7 +38,7 @@
 
 14. **Top-k=5 retrieval** — Balances context richness vs. LLM token limits.
 
-15. **Auto-index after SQL/ML** — Orchestrator indexes successful agent results into Chroma so follow-up RAG works without manual step.
+15. **Auto-index after SQL/ML/stats/forecast/quality/report** — Orchestrator indexes successful agent results into Chroma so follow-up RAG works without manual step.
 
 ## UI
 
@@ -48,6 +48,83 @@
 
 ## LLM
 
-18. **Groq `llama-3.3-70b-versatile`** — Used for SQL generation, explanations, ML summaries, RAG answers, and orchestration classification.
+18. **Groq `llama-3.3-70b-versatile`** — Used for SQL generation, explanations, ML summaries, RAG answers, orchestration classification, and report executive summaries.
 
 19. **Graceful API key fallback** — App runs without key; sidebar warning + agent-level errors instead of crashes.
+
+---
+
+## Full Analyst Upgrade (2026-07)
+
+### Phase A — Data Quality Agent
+
+20. **Quality as a soft gate, not a blocker** — After ingestion, auto-run `analyze_data_quality` and show a card with score + metrics. User can auto-clean or skip; analysis never blocked.
+
+21. **Auto-clean defaults (safe only)** — Drop exact duplicates; median impute for numeric missing; mode impute for categorical missing; cast numbers-stored-as-text. **Never** auto-remove outliers or merge categories (flag for review only).
+
+22. **Outliers via IQR (1.5×)** — Standard, dependency-free heuristic suitable for small demo datasets; z-score not used as primary (small-n unstable).
+
+23. **Categorical near-duplicates** — `SequenceMatcher` + substring heuristics flag groups like USA/US/United States; never auto-merge.
+
+### Phase B — Expanded EDA
+
+24. **Full descriptive stats** — mean, median, std, min/max, q25/q75 per numeric column; `describe_table` exposed in UI.
+
+25. **Group-by auto-suggestions** — Up to 3 low-cardinality categorical × KPI-like numeric pairs as bar charts.
+
+26. **Time-series charts only when date-like** — Heuristic requires digit patterns before `to_datetime` to avoid parsing free-text categories (and noisy warnings).
+
+### Phase C — Stats Agent
+
+27. **Welch t-test (2 groups) / one-way ANOVA (3+)** — SciPy; always attach assumptions + small-sample caveats; never claim causation.
+
+28. **Pearson correlation ranking** — Encode low-cardinality non-numeric targets via factorize for churn-style questions.
+
+29. **Intent detection** — Keyword rules for outliers / correlation / comparison before falling back to correlation.
+
+### Phase D — Forecasting
+
+30. **LinearRegression trend + residual band** — Lightweight, no Prophet/statsmodels. Approx. 95% band = ±1.96 × residual_std × mild horizon scale. Explicitly labeled as estimates.
+
+31. **No-date fallback** — Use observation index as time proxy so forecasts still work on churn/house samples; caveat in summary.
+
+### Phase E — Report Export
+
+32. **HTML over PDF** — HTML download works reliably in Streamlit Community Cloud without WeasyPrint/wkhtmltopdf. User can print-to-PDF from browser.
+
+33. **Executive summary** — LLM when API available; deterministic fallback from findings so offline tests still produce a report.
+
+### Phase F — Orchestrator
+
+34. **Route priority** — report → quality → forecast → stats → ml → sql → rag. Specific multi-word phrases before broad keywords like "analysis" / "report".
+
+35. **Report phrase variants** — Match `generate a report` (not only `generate report`) to avoid false ML/RAG routing.
+
+### Phase G — UI
+
+36. **Persistent sidebar "What I can help with"** — Lists cleaning, EDA, stats, forecast, ML, reports, SQL, RAG so non-technical users know the surface area.
+
+37. **Generate Report button** — Always available when data is loaded; compiles whatever session findings exist so far.
+
+---
+
+## Testing log (upgrade)
+
+### Bugs found and fixed during self-test loop
+
+| # | Phase | Bug | Fix |
+|---|-------|-----|-----|
+| 1 | F | `"Generate a report of my analysis"` routed away from `report` because keyword was exact phrase `generate report` (no room for "a") and `"analysis"` matched ML | Added `generate a report`, `create a report`, `analysis report`, etc. |
+| 2 | B/D | `pd.to_datetime` on categorical text columns emitted noisy parse warnings and risked false date detection | Date detection now requires digit/date-like patterns and caps high-cardinality text; uses `format="mixed"` |
+
+### Regression results (final clean pass)
+
+- `python self_test.py` → **125 passed, 0 failed, 0 skipped**
+- Covered: SQL safety (SELECT/CTE/window + injection blocks), quality profile + auto-clean (outliers not dropped), expanded EDA, stats (t-test/ANOVA/corr/outliers), forecast bands, HTML report, orchestrator routes, full churn + houses flows (SQL, ML, RAG, quality, stats, forecast, report).
+
+### Guardrails re-confirmed
+
+- SQL safety validator unchanged in spirit (SELECT/WITH only, word-boundary forbidden keywords, no multi-statement).
+- Auto-clean never drops outliers or merges categories without user action.
+- Stats/forecast language always includes caveats (sample size, correlation ≠ causation, estimate bands).
+- Works on small sample CSVs (~25–30 rows) and synthetic messy data.

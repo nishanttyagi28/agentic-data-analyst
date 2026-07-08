@@ -24,8 +24,10 @@ from utils.charts import (
     correlation_heatmap,
     distribution_chart,
     feature_importance_chart,
+    groupby_bar_chart,
     missing_values_chart,
     pca_scatter,
+    time_series_chart,
 )
 
 TARGET_KEYWORDS = {
@@ -66,6 +68,62 @@ def detect_task_type(df: pd.DataFrame, target_col: str | None, user_query: str =
     return "classification"
 
 
+def _detect_date_column(df: pd.DataFrame) -> str | None:
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            return col
+    for col in df.columns:
+        if any(k in str(col).lower() for k in ("date", "time", "month", "year", "day", "timestamp")):
+            parsed = pd.to_datetime(df[col], errors="coerce", format="mixed")
+            if len(df) and parsed.notna().mean() >= 0.8:
+                return col
+    for col in df.select_dtypes(include=["object", "string"]).columns:
+        # Skip high-cardinality free text / obvious non-dates
+        if df[col].nunique() > min(50, max(3, len(df) // 2)):
+            continue
+        sample = df[col].dropna().astype(str).head(30)
+        if sample.empty:
+            continue
+        # Heuristic: values should look date-like
+        if not sample.str.contains(r"\d{4}|\d{1,2}[/-]\d{1,2}", regex=True).mean() >= 0.5:
+            continue
+        parsed = pd.to_datetime(df[col], errors="coerce", format="mixed")
+        if len(df) and parsed.notna().mean() >= 0.8:
+            return col
+    return None
+
+
+def _suggest_groupings(df: pd.DataFrame, numeric_cols: list[str], cat_cols: list[str]) -> list[dict[str, str]]:
+    """Suggest up to 3 useful group-by chart specs."""
+    suggestions = []
+    if not numeric_cols or not cat_cols:
+        return suggestions
+    # Prefer metrics that look like KPIs
+    metrics = sorted(
+        numeric_cols,
+        key=lambda c: (
+            0 if any(k in c.lower() for k in ("price", "revenue", "sales", "amount", "charge", "income")) else 1,
+            -df[c].nunique() if c in df.columns else 0,
+        ),
+    )
+    cats = sorted(cat_cols, key=lambda c: df[c].nunique())
+    pairs = []
+    for cat in cats:
+        if df[cat].nunique() < 2 or df[cat].nunique() > 30:
+            continue
+        for metric in metrics:
+            if metric == cat:
+                continue
+            pairs.append((cat, metric))
+            if len(pairs) >= 3:
+                break
+        if len(pairs) >= 3:
+            break
+    for cat, metric in pairs[:3]:
+        suggestions.append({"group_col": cat, "metric_col": metric, "agg": "mean"})
+    return suggestions
+
+
 def run_eda(df: pd.DataFrame) -> dict[str, Any]:
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
@@ -77,38 +135,85 @@ def run_eda(df: pd.DataFrame) -> dict[str, Any]:
         for col in df.columns if missing[col] > 0
     }
 
+    # Full descriptive statistics for numeric columns
     stats = {}
+    describe_rows = []
     for col in numeric_cols:
-        stats[col] = {
-            "mean": float(df[col].mean()) if df[col].notna().any() else None,
-            "std": float(df[col].std()) if df[col].notna().any() else None,
-            "min": float(df[col].min()) if df[col].notna().any() else None,
-            "max": float(df[col].max()) if df[col].notna().any() else None,
+        s = df[col].dropna()
+        if s.empty:
+            continue
+        col_stats = {
+            "mean": float(s.mean()),
+            "median": float(s.median()),
+            "std": float(s.std()) if len(s) > 1 else 0.0,
+            "min": float(s.min()),
+            "max": float(s.max()),
+            "q25": float(s.quantile(0.25)),
+            "q75": float(s.quantile(0.75)),
+            "count": int(s.count()),
         }
+        stats[col] = col_stats
+        describe_rows.append({"column": col, **col_stats})
+
+    describe_table = pd.DataFrame(describe_rows) if describe_rows else pd.DataFrame()
 
     cat_summary = {}
     for col in cat_cols:
-        cat_summary[col] = df[col].value_counts().head(10).to_dict()
+        cat_summary[col] = {str(k): int(v) for k, v in df[col].value_counts().head(15).items()}
 
-    charts = {
+    # Correlation matrix values (for reports) + heatmap
+    corr_matrix = None
+    if len(numeric_cols) >= 2:
+        corr_matrix = df[numeric_cols].corr().round(3)
+
+    charts: dict[str, Any] = {
         "missing": missing_values_chart(df),
         "correlation": correlation_heatmap(df),
         "distributions": {},
+        "groupbys": {},
+        "timeseries": {},
     }
-    for col in (numeric_cols + cat_cols)[:6]:
+
+    # Histograms for numeric, bar charts for categorical (top N)
+    plot_cols = numeric_cols[:8] + cat_cols[:6]
+    for col in plot_cols:
         chart = distribution_chart(df, col)
         if chart:
             charts["distributions"][col] = chart
 
-    eda_text = _build_eda_summary(df, missing_report, stats, cat_summary)
+    # Time-series if a date column exists
+    date_col = _detect_date_column(df)
+    if date_col and numeric_cols:
+        metric_candidates = [
+            c for c in numeric_cols
+            if any(k in c.lower() for k in ("price", "revenue", "sales", "amount", "charge", "value", "total"))
+        ] or numeric_cols[:2]
+        for metric in metric_candidates[:2]:
+            ts = time_series_chart(df, date_col, metric)
+            if ts:
+                charts["timeseries"][f"{metric}_over_time"] = ts
+
+    # Auto group-by summaries (2–3 charts)
+    groupings = _suggest_groupings(df, numeric_cols, cat_cols)
+    for g in groupings:
+        fig = groupby_bar_chart(df, g["group_col"], g["metric_col"], agg=g["agg"])
+        if fig:
+            key = f"{g['metric_col']}_by_{g['group_col']}"
+            charts["groupbys"][key] = fig
+
+    eda_text = _build_eda_summary(df, missing_report, stats, cat_summary, date_col, groupings)
     return {
         "missing_report": missing_report,
         "numeric_stats": stats,
+        "describe_table": describe_table,
+        "correlation_matrix": corr_matrix,
         "categorical_summary": cat_summary,
         "charts": charts,
         "summary_text": eda_text,
         "numeric_columns": numeric_cols,
         "categorical_columns": cat_cols,
+        "date_column": date_col,
+        "groupings": groupings,
     }
 
 
@@ -117,18 +222,33 @@ def _build_eda_summary(
     missing: dict,
     stats: dict,
     cat_summary: dict,
+    date_col: str | None = None,
+    groupings: list | None = None,
 ) -> str:
     lines = [
         f"Dataset: {len(df)} rows, {len(df.columns)} columns",
         f"Numeric columns: {', '.join(stats.keys()) or 'none'}",
         f"Categorical columns: {', '.join(cat_summary.keys()) or 'none'}",
     ]
+    if date_col:
+        lines.append(f"Date/time column detected: {date_col}")
     if missing:
         lines.append("Missing values:")
         for col, info in missing.items():
             lines.append(f"  - {col}: {info['count']} ({info['pct']}%)")
     else:
         lines.append("No missing values detected.")
+    if stats:
+        lines.append("Numeric highlights (mean / median / std):")
+        for col, s in list(stats.items())[:6]:
+            lines.append(
+                f"  - {col}: mean={s['mean']:.3g}, median={s['median']:.3g}, std={s.get('std', 0):.3g}, "
+                f"range=[{s['min']:.3g}, {s['max']:.3g}]"
+            )
+    if groupings:
+        lines.append("Suggested groupings: " + ", ".join(
+            f"{g['metric_col']} by {g['group_col']}" for g in groupings
+        ))
     return "\n".join(lines)
 
 

@@ -98,3 +98,54 @@ def feature_importance_chart(importances: dict[str, float], top_n: int = 15) -> 
     fig = go.Figure(go.Bar(x=values, y=names, orientation="h", marker_color="#00CC96"))
     fig.update_layout(title="Top Feature Importances", height=max(300, len(names) * 30))
     return fig
+
+
+def time_series_chart(
+    df: pd.DataFrame,
+    date_col: str,
+    metric_col: str,
+    title: str | None = None,
+) -> go.Figure | None:
+    work = df[[date_col, metric_col]].copy()
+    work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+    work[metric_col] = pd.to_numeric(work[metric_col], errors="coerce")
+    work = work.dropna().sort_values(date_col)
+    if work.empty:
+        return None
+    work = work.groupby(date_col, as_index=False)[metric_col].mean()
+    fig = px.line(
+        work, x=date_col, y=metric_col, markers=True,
+        title=title or f"{metric_col} over time",
+    )
+    fig.update_layout(height=380)
+    return fig
+
+
+def groupby_bar_chart(
+    df: pd.DataFrame,
+    group_col: str,
+    metric_col: str,
+    agg: str = "mean",
+    top_n: int = 15,
+) -> go.Figure | None:
+    work = df[[group_col, metric_col]].copy()
+    work[metric_col] = pd.to_numeric(work[metric_col], errors="coerce")
+    work = work.dropna()
+    if work.empty:
+        return None
+    grouped = work.groupby(group_col)[metric_col]
+    if agg == "sum":
+        series = grouped.sum()
+    elif agg == "count":
+        series = grouped.count()
+    else:
+        series = grouped.mean()
+    series = series.sort_values(ascending=False).head(top_n)
+    fig = go.Figure(go.Bar(x=series.index.astype(str), y=series.values, marker_color="#FFA15A"))
+    fig.update_layout(
+        title=f"{agg.title()} of {metric_col} by {group_col}",
+        xaxis_title=group_col,
+        yaxis_title=f"{agg}({metric_col})",
+        height=380,
+    )
+    return fig

@@ -5,9 +5,26 @@
 [![Groq](https://img.shields.io/badge/LLM-Groq%20Llama%203.3-orange)](https://groq.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Upload a CSV, ask questions in plain English, and get SQL answers, automated ML analysis, and RAG-powered follow-ups — all from a single chat interface.
+Upload a CSV, ask questions in plain English, and get data cleaning, EDA, stats tests, forecasts, ML models, downloadable reports, and RAG-powered follow-ups — all from a single chat interface.
 
 **Live Demo:** [https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/)
+
+## What This Tool Can Do
+
+A complete self-serve data analyst replacement for standard requests:
+
+| Capability | What you can ask / do |
+|------------|------------------------|
+| **Data cleaning** | Quality score after upload; missing values, duplicates, type issues, outliers, inconsistent categories. One-click auto-clean (median/mode impute + drop exact duplicates) or skip. |
+| **SQL queries** | Counts, filters, rankings, aggregations in plain English (SELECT/CTE only — safe). |
+| **EDA** | Full descriptive stats, correlation heatmap, distributions, group-by charts, time-series when dates exist. |
+| **Stats tests** | t-test / ANOVA for group differences, correlation rankings vs a target, outlier summaries — with plain-English caveats. |
+| **Forecasting** | Linear-trend forecasts with approximate confidence bands when a date + metric exists (or row-order fallback). |
+| **ML modeling** | Classification, regression, or clustering with metrics and feature importance. |
+| **Reports** | Generate a downloadable HTML report anytime (executive summary + session findings). |
+| **Follow-up chat (RAG)** | Ask about prior SQL/ML/stats/forecast/quality results with citations. |
+
+All of the above is routed through the **same chat** — no separate modes to learn.
 
 ## Business Problem & Solution
 
@@ -21,9 +38,12 @@ Worse, once an analysis or report is delivered, it's static. Ask a follow-up a w
 
 **Agentic Data Analyst** gives any team member — no SQL or ML background required — a single chat interface over their data:
 
-1. **Natural-language SQL** — quick facts and aggregations on demand
-2. **Automated ML** — predictive answers (e.g. *who is likely to churn?*)
-3. **RAG follow-up chat** — past insights stay queryable; analysis becomes a living conversation, not a one-time PDF
+1. **Data quality gate** — trust (or clean) the data before analyzing
+2. **Natural-language SQL** — quick facts and aggregations on demand
+3. **EDA + stats + forecasts** — explore, test, and project without a stats package
+4. **Automated ML** — predictive answers (e.g. *who is likely to churn?*)
+5. **Shareable reports** — download an executive HTML summary anytime
+6. **RAG follow-up chat** — past insights stay queryable; analysis becomes a living conversation
 
 ### Example: SaaS customer retention
 
@@ -31,11 +51,14 @@ A retention manager uploads `customer_churn.csv` and works through a realistic w
 
 | Step | What they ask | What happens |
 |------|---------------|--------------|
+| 0 | *(after upload)* | Quality report shows score, missing values, duplicates — auto-clean or skip |
 | 1 | *"How many customers churned?"* | SQL agent returns the count instantly — no analyst ticket |
-| 2 | *"Train a model to predict which customers are at risk"* | ML agent runs EDA, trains a classifier, surfaces at-risk patterns |
-| 3 | *"Why are these customers churning? What should we do?"* | RAG agent pulls from prior SQL + ML results and gives grounded recommendations |
+| 2 | *"What's correlated with churn?"* | Stats agent ranks features with plain-English caveats |
+| 3 | *"Train a model to predict which customers are at risk"* | ML agent runs EDA, trains a classifier, surfaces at-risk patterns |
+| 4 | *"Generate a report"* | HTML report with executive summary for their manager |
+| 5 | *"Why are these customers churning? What should we do?"* | RAG agent pulls from prior results and gives grounded recommendations |
 
-Same day: facts, predictions, and actionable follow-ups — without a single line of SQL.
+Same day: clean data, facts, stats, predictions, a shareable report, and follow-ups — without a single line of SQL.
 
 ### Who it's for
 
@@ -51,10 +74,13 @@ Same day: facts, predictions, and actionable follow-ups — without a single lin
 **Agentic Data Analyst** is a multi-agent Streamlit app that turns tabular data into an interactive analysis workspace:
 
 1. **Ingest** — Upload a CSV; column names are cleaned, types inferred, and data loaded into SQLite.
-2. **Query** — Ask natural-language questions; a SQL agent generates safe `SELECT`-only queries via Groq LLM.
-3. **Analyze** — An ML agent auto-detects classification, regression, or clustering, runs EDA, trains models, and reports metrics.
-4. **Remember** — EDA/ML/SQL outputs are chunked and embedded in ChromaDB for grounded follow-up Q&A (RAG).
-5. **Route** — An orchestrator classifies each message and dispatches it to the right agent.
+2. **Quality** — Profile missing values, duplicates, outliers, type issues; optional safe auto-clean.
+3. **Query** — Natural-language questions → safe `SELECT`/CTE SQL via Groq LLM.
+4. **Explore & test** — Expanded EDA, statistical tests, and lightweight forecasts.
+5. **Model** — Classification, regression, or clustering with metrics and charts.
+6. **Report** — Downloadable HTML report with an executive summary.
+7. **Remember** — All agent outputs are indexed in ChromaDB for grounded follow-up Q&A (RAG).
+8. **Route** — Orchestrator classifies each message and dispatches it to the right agent.
 
 ---
 
@@ -70,8 +96,12 @@ flowchart TB
     ORCH[Orchestrator<br/>rule-based + LLM routing]
 
     subgraph Agents
-        SQL[SQL Agent<br/>Groq → SELECT only]
+        QUAL[Quality Agent<br/>profile + safe clean]
+        SQL[SQL Agent<br/>Groq → SELECT/CTE only]
         ML[ML Agent<br/>EDA + XGBoost / KMeans]
+        STATS[Stats Agent<br/>t-test / ANOVA / corr]
+        FC[Forecast Agent<br/>trend + bands]
+        RPT[Report Agent<br/>HTML export]
         RAG[RAG Agent<br/>ChromaDB retrieval]
     end
 
