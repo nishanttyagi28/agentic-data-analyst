@@ -7,6 +7,39 @@
 
 Upload a CSV, ask questions in plain English, and get SQL answers, automated ML analysis, and RAG-powered follow-ups — all from a single chat interface.
 
+## Business Problem & Solution
+
+### The problem
+
+Business teams sit on valuable data — CSV exports, CRM dumps, billing tables — but most stakeholders can't write SQL. Every small question (*"How many customers churned this month?"*, *"What's our average deal size?"*) has to go through a data analyst. That creates bottlenecks, slows decisions, and burns analyst time on repetitive queries instead of deeper work.
+
+Worse, once an analysis or report is delivered, it's static. Ask a follow-up a week later and the whole exercise often starts over.
+
+### The solution
+
+**Agentic Data Analyst** gives any team member — no SQL or ML background required — a single chat interface over their data:
+
+1. **Natural-language SQL** — quick facts and aggregations on demand
+2. **Automated ML** — predictive answers (e.g. *who is likely to churn?*)
+3. **RAG follow-up chat** — past insights stay queryable; analysis becomes a living conversation, not a one-time PDF
+
+### Example: SaaS customer retention
+
+A retention manager uploads `customer_churn.csv` and works through a realistic workflow:
+
+| Step | What they ask | What happens |
+|------|---------------|--------------|
+| 1 | *"How many customers churned?"* | SQL agent returns the count instantly — no analyst ticket |
+| 2 | *"Train a model to predict which customers are at risk"* | ML agent runs EDA, trains a classifier, surfaces at-risk patterns |
+| 3 | *"Why are these customers churning? What should we do?"* | RAG agent pulls from prior SQL + ML results and gives grounded recommendations |
+
+Same day: facts, predictions, and actionable follow-ups — without a single line of SQL.
+
+### Who it's for
+
+- **Managers & founders** who need fast, self-serve answers from their own data
+- **Analysts & engineers** who want a reusable agentic pattern (SQL + ML + RAG behind one orchestrator) they can point at other datasets
+
 > **Portfolio note:** The bundled sample datasets are intentionally small (~25–30 rows) so you can demo the full pipeline quickly. ML metrics (accuracy, R², silhouette score) illustrate the workflow — they are **not** production-grade model performance. Use your own datasets for meaningful evaluation.
 
 ---

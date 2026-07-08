@@ -147,8 +147,8 @@ def render_sidebar():
 def render_chat():
     st.markdown('<p class="main-header">Agentic Data Analyst</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="sub-header">Upload a CSV, then ask questions in plain English — '
-        'SQL queries, ML analysis, or follow-ups on prior insights.</p>',
+        '<p class="sub-header">Ask questions about your data in plain English — no SQL or ML expertise needed. '
+        'Get instant answers, predictive insights, and a chat that remembers your analysis.</p>',
         unsafe_allow_html=True,
     )
 
