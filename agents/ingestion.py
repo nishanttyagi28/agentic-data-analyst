@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Any
 
 import pandas as pd
@@ -27,12 +28,14 @@ def infer_and_cast_types(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     for col in result.columns:
         series = result[col]
-        if series.dtype == object:
+        if not pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_datetime64_any_dtype(series):
             numeric = pd.to_numeric(series, errors="coerce")
             if numeric.notna().sum() >= len(series) * 0.8:
                 result[col] = numeric
                 continue
-            dt = pd.to_datetime(series, errors="coerce", infer_datetime_format=True)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                dt = pd.to_datetime(series, errors="coerce")
             if dt.notna().sum() >= len(series) * 0.8:
                 result[col] = dt
     return result

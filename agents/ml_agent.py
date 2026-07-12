@@ -409,7 +409,8 @@ def train_classification(X: np.ndarray, y: pd.Series, feature_names: list[str]) 
     """AutoML: logistic regression, random forest, XGBoost with tiny grids; pick best F1."""
     le = LabelEncoder()
     y_enc = le.fit_transform(y.astype(str))
-    strat = y_enc if len(np.unique(y_enc)) > 1 else None
+    _, class_counts = np.unique(y_enc, return_counts=True)
+    strat = y_enc if len(class_counts) > 1 and class_counts.min() >= 2 else None
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_enc, test_size=0.2, random_state=42, stratify=strat
     )

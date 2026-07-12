@@ -46,13 +46,11 @@ def register_dataframe(
     work.columns = cols
     work = infer_and_cast_types(work)
     tname = sanitize_table_name(table_name)
-    # avoid collision
+    # avoid collision: only reuse an existing name if it holds the exact same
+    # data (idempotent re-registration); any other content gets a new name.
     base = tname
     n = 2
     while tname in tables and not work.equals(tables.get(tname, pd.DataFrame())):
-        # if different content, new name
-        if tables[tname] is not None and list(tables[tname].columns) == list(work.columns) and len(tables[tname]) == len(work):
-            break
         tname = f"{base}_{n}"
         n += 1
         if n > 20:

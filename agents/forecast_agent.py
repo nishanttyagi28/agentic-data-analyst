@@ -797,6 +797,14 @@ def run_forecast(
             # Aggregate duplicates on same date (mean of metric)
             work = work.groupby(date_col, as_index=False)[metric].mean()
             work = work.sort_values(date_col).reset_index(drop=True)
+            if len(work) < 3:
+                return {
+                    "success": False,
+                    "error": "Need at least 3 distinct dated observations to forecast",
+                    "agent": "forecast",
+                    "date_parse": col_meta,
+                    "warnings": warnings,
+                }
             deltas = work[date_col].diff().dt.total_seconds().dropna() / 86400.0
             deltas_arr = deltas.values.astype(float)
             freq_days = float(np.median(deltas_arr)) if len(deltas_arr) else 1.0

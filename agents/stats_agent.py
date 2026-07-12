@@ -104,12 +104,21 @@ def run_group_comparison(df: pd.DataFrame, group_col: str, metric_col: str) -> d
 
     p_val = float(p_val)
     alpha = 0.05
-    if p_val < alpha:
+    undefined = not np.isfinite(p_val)
+    if undefined:
+        interpretation = (
+            f"Could not compute a valid p-value for {metric_col} across {group_col} groups: "
+            "at least one group has zero variance (all identical values), so the test statistic "
+            f"is undefined. Observed means: {', '.join(f'{k}={v:.3g}' for k, v in group_means.items())}."
+        )
+        significant = None
+    elif p_val < alpha:
         interpretation = (
             f"There is a statistically significant difference in {metric_col} across "
             f"{group_col} groups (p={p_val:.4f} < {alpha}). "
             f"Group means: {', '.join(f'{k}={v:.3g}' for k, v in group_means.items())}."
         )
+        significant = True
     else:
         interpretation = (
             f"No statistically significant difference in {metric_col} across {group_col} "
@@ -117,6 +126,7 @@ def run_group_comparison(df: pd.DataFrame, group_col: str, metric_col: str) -> d
             f"{', '.join(f'{k}={v:.3g}' for k, v in group_means.items())}. "
             f"A real effect may still exist but this sample does not show clear evidence."
         )
+        significant = False
 
     return {
         "success": True,
@@ -127,16 +137,16 @@ def run_group_comparison(df: pd.DataFrame, group_col: str, metric_col: str) -> d
         "n_groups": n_groups,
         "group_means": group_means,
         "group_sizes": {lab: int(len(g)) for lab, g in zip(labels, groups)},
-        "statistic": stat_val,
-        "p_value": p_val,
+        "statistic": stat_val if np.isfinite(stat_val) else None,
+        "p_value": None if undefined else p_val,
         "alpha": alpha,
-        "significant": p_val < alpha,
+        "significant": significant,
         "interpretation": interpretation,
         "assumptions": assumptions,
         "summary": interpretation + "\n\nCaveats: " + " ".join(assumptions),
         "summary_for_rag": (
             f"Stats test: {test_name} on {metric_col} by {group_col}\n"
-            f"p={p_val:.4f}, significant={p_val < alpha}\n{interpretation}"
+            f"p={'undefined' if undefined else f'{p_val:.4f}'}, significant={significant}\n{interpretation}"
         ),
     }
 
@@ -177,14 +187,24 @@ def run_correlation_analysis(df: pd.DataFrame, target_col: str | None = None) ->
     if not features:
         return {"success": False, "error": "No feature columns to correlate with target", "agent": "stats"}
 
-    rankings = []
     y = pd.to_numeric(work[target_use], errors="coerce")
+    if y.dropna().nunique() <= 1:
+        return {
+            "success": False,
+            "error": f"Target '{target_col}' has no variance (all values identical) — correlation is undefined",
+            "agent": "stats",
+        }
+
+    rankings = []
     for col in features:
         x = pd.to_numeric(work[col], errors="coerce")
         mask = x.notna() & y.notna()
         if mask.sum() < 3:
             continue
-        r, p = stats.pearsonr(x[mask], y[mask])
+        xm, ym = x[mask], y[mask]
+        if xm.nunique() <= 1:
+            continue  # constant feature — correlation undefined, skip rather than mislabel
+        r, p = stats.pearsonr(xm, ym)
         rankings.append({
             "column": col,
             "correlation": float(r),
@@ -192,6 +212,13 @@ def run_correlation_analysis(df: pd.DataFrame, target_col: str | None = None) ->
             "p_value": float(p),
         })
     rankings.sort(key=lambda d: d["abs_correlation"], reverse=True)
+
+    if not rankings:
+        return {
+            "success": False,
+            "error": "No feature columns had enough variance/overlap to compute correlation",
+            "agent": "stats",
+        }
 
     lines = [f"Correlations with target `{target_col}` (Pearson):"]
     for item in rankings[:10]:

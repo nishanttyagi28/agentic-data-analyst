@@ -31,7 +31,6 @@ def _iqr_outliers(series: pd.Series) -> dict[str, Any]:
     if iqr == 0:
         return {"count": 0, "pct": 0.0, "bounds": (q1, q3), "indices": []}
     low, high = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-    mask = (series < low) | (series > high)
     # Align to original index for numeric-convertible values only
     numeric = pd.to_numeric(series, errors="coerce")
     mask = (numeric < low) | (numeric > high)
