@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from typing import Iterator
+
 from utils.env import ENV_FILE, get_groq_api_key, load_project_env
 
 load_project_env()
@@ -9,6 +14,47 @@ load_project_env()
 GROQ_MODEL = "llama-3.3-70b-versatile"
 _client = None
 _cached_key: str | None = None
+
+
+@dataclass
+class LLMUsage:
+    """Provider-reported token usage collected within one logical operation."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls: int = 0
+    model: str = GROQ_MODEL
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
+_active_usage: ContextVar[LLMUsage | None] = ContextVar("active_llm_usage", default=None)
+
+
+@contextmanager
+def capture_llm_usage() -> Iterator[LLMUsage]:
+    """Collect usage without changing the established chat_completion contract."""
+
+    usage = LLMUsage()
+    token = _active_usage.set(usage)
+    try:
+        yield usage
+    finally:
+        _active_usage.reset(token)
+
+
+def _record_usage(response: object) -> None:
+    active = _active_usage.get()
+    if active is None:
+        return
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    active.prompt_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
+    active.completion_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
+    active.calls += 1
 
 
 def get_groq_client():
@@ -45,6 +91,7 @@ def chat_completion(
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        _record_usage(response)
         return response.choices[0].message.content or "", None
     except Exception as e:
         return None, f"LLM request failed: {e}"
