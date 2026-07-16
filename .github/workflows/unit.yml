@@ -1,0 +1,22 @@
+name: Agent unit tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install focused test dependencies
+        run: python -m pip install pytest python-dotenv
+      - name: Run unit tests
+        run: python -m pytest -q tests/test_llm_usage.py
