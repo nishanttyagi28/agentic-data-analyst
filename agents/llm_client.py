@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+import re
+import time
 from typing import Iterator
 
 from utils.env import ENV_FILE, get_groq_api_key, load_project_env
@@ -31,6 +33,7 @@ class LLMUsage:
 
 
 _active_usage: ContextVar[LLMUsage | None] = ContextVar("active_llm_usage", default=None)
+MAX_RATE_LIMIT_RETRIES = 3
 
 
 @contextmanager
@@ -55,6 +58,29 @@ def _record_usage(response: object) -> None:
     active.prompt_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
     active.completion_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
     active.calls += 1
+
+
+def _rate_limit_delay(error: Exception, attempt: int) -> float | None:
+    """Return retry delay for provider 429 errors, otherwise None."""
+    status = getattr(error, "status_code", None)
+    message = str(error)
+    if status != 429 and "429" not in message:
+        return None
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    if retry_after:
+        try:
+            return min(max(float(retry_after), 0.25), 30.0)
+        except (TypeError, ValueError):
+            pass
+    match = re.search(r"try again in\s+([\d.]+)\s*(ms|s)?", message, re.IGNORECASE)
+    if match:
+        delay = float(match.group(1))
+        if (match.group(2) or "s").lower() == "ms":
+            delay /= 1000.0
+        return min(max(delay, 0.25), 30.0)
+    return min(2.0**attempt, 10.0)
 
 
 def get_groq_client():
@@ -84,14 +110,19 @@ def chat_completion(
     client, err = get_groq_client()
     if err:
         return None, err
-    try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        _record_usage(response)
-        return response.choices[0].message.content or "", None
-    except Exception as e:
-        return None, f"LLM request failed: {e}"
+    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+        try:
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            _record_usage(response)
+            return response.choices[0].message.content or "", None
+        except Exception as e:
+            delay = _rate_limit_delay(e, attempt)
+            if delay is None or attempt >= MAX_RATE_LIMIT_RETRIES:
+                return None, f"LLM request failed: {e}"
+            time.sleep(delay + 0.1)
+    return None, "LLM request failed after retries"
