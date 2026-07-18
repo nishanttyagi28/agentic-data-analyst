@@ -636,6 +636,8 @@ User request: {user_query}"""
     ], max_tokens=500)
     if summary:
         return summary, err
+    # Intentional degraded-but-deterministic answer when summarization is unavailable;
+    # preserve the provider error separately instead of leaking it into user-facing text.
     fallback = (
         f"Completed {task} with {model_name or 'baseline'}. Metrics: {metrics_str}. "
         f"{why_best} {drivers} Risks: {risks}."
