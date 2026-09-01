@@ -1,309 +1,235 @@
 # Agentic Data Analyst
 
+A Streamlit app I built so you can upload CSV files, ask questions in plain English, and get cleaning help, SQL answers, charts, simple forecasts, AutoML, and a downloadable report — in one chat.
+
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.59-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
-[![Groq](https://img.shields.io/badge/LLM-Groq%20Llama%203.3-orange)](https://groq.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit%20Cloud-FF4B4B?logo=streamlit&logoColor=white)](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/)
 
-Upload CSV(s), ask questions in plain English, and get cleaning, proactive insight suggestions, multi-table SQL, AutoML, stats, forecasts, reports, and RAG follow-ups — from a single chat.
+Most teams have useful data sitting in CSV exports. Asking a simple question still often means waiting on someone who can write SQL, open a notebook, or build a chart.
 
-**Live Demo:** [https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/)
+I built this so a person can drop in a file, ask what they need, and keep going in the same conversation — including follow-ups about what the app already found.
 
-## What This Tool Can Do
-
-A strong self-serve **technical analyst** for standard and multi-step requests:
-
-| Capability | What you can ask / do |
-|------------|------------------------|
-| **Data cleaning** | Quality score after upload; missing values, duplicates, type issues, outliers. Safe auto-clean (median/mode + drop exact dups) or skip. |
-| **Ambiguous decisions** | When categories look synonymous (e.g. USA/US) or a column looks ID-like, you get explicit choices — merge / keep separate / exclude from ML. Nothing ambiguous is auto-decided. |
-| **Proactive insights** | “Suggest what to explore” — 3–5 concrete, data-specific questions (correlations, imbalances, spikes). Click to run. |
-| **SQL (incl. multi-table)** | Counts, filters, rankings, CTEs/window functions; multi-CSV upload with join-key hints and JOIN-capable SQL. |
-| **EDA** | Full descriptive stats, correlation heatmap, distributions, group-by charts, time-series when dates exist. |
-| **Stats tests** | t-test / ANOVA, correlation rankings, outlier summaries — with plain-English caveats. |
-| **Forecasting** | Linear-trend estimates with uncertainty bands; mixed-format dates; non-negative clip for counts; event framing when irregular. |
-| **AutoML** | Tries multiple models (e.g. logistic regression, random forest, XGBoost), light hyperparameter search, feature prep, driver language, overfit/leakage flags. |
-| **Business context** | Optional “what’s this data about?” field to bias insight wording and report framing. |
-| **Reports** | Downloadable HTML with executive summary from the session so far. |
-| **Follow-up chat (RAG)** | Ask about prior findings with citations. |
-
-All of the above is routed through the **same chat** — no separate modes to learn.
-
-### What this tool does **not** replace
-
-Be explicit about remaining human work:
-
-- **Business strategy & stakeholder communication** — suggestions and reports help; they do not set goals, politics, or executive narrative for you.
-- **Causal claims** — correlations, models, and tests are association-based unless you design a proper experiment.
-- **Production ML systems** — AutoML here is exploratory on session data, not deployment pipelines, monitoring, or fairness audits.
-- **Domain judgment on merges & IDs** — the app surfaces options; you still choose whether “US” = “USA”.
-- **Heavy time-series / econometrics** — forecasts are lightweight trend estimates, not full ARIMA/Prophet ensembles.
-
-## Business Problem & Solution
-
-### The problem
-
-Business teams sit on valuable data — CSV exports, CRM dumps, billing tables — but most stakeholders can't write SQL. Every small question (*"How many customers churned this month?"*, *"What's our average deal size?"*) has to go through a data analyst. That creates bottlenecks, slows decisions, and burns analyst time on repetitive queries instead of deeper work.
-
-Worse, once an analysis or report is delivered, it's static. Ask a follow-up a week later and the whole exercise often starts over.
-
-### The solution
-
-**Agentic Data Analyst** gives any team member — no SQL or ML background required — a single chat interface over their data:
-
-1. **Data quality gate** — trust (or clean) the data before analyzing
-2. **Natural-language SQL** — quick facts and aggregations on demand
-3. **EDA + stats + forecasts** — explore, test, and project without a stats package
-4. **Automated ML** — predictive answers (e.g. *who is likely to churn?*)
-5. **Shareable reports** — download an executive HTML summary anytime
-6. **RAG follow-up chat** — past insights stay queryable; analysis becomes a living conversation
-
-### Example: SaaS customer retention
-
-A retention manager uploads `customer_churn.csv` and works through a realistic workflow:
-
-| Step | What they ask | What happens |
-|------|---------------|--------------|
-| 0 | *(after upload)* | Quality report shows score, missing values, duplicates — auto-clean or skip |
-| 1 | *"How many customers churned?"* | SQL agent returns the count instantly — no analyst ticket |
-| 2 | *"What's correlated with churn?"* | Stats agent ranks features with plain-English caveats |
-| 3 | *"Train a model to predict which customers are at risk"* | ML agent runs EDA, trains a classifier, surfaces at-risk patterns |
-| 4 | *"Generate a report"* | HTML report with executive summary for their manager |
-| 5 | *"Why are these customers churning? What should we do?"* | RAG agent pulls from prior results and gives grounded recommendations |
-
-Same day: clean data, facts, stats, predictions, a shareable report, and follow-ups — without a single line of SQL.
-
-### Who it's for
-
-- **Managers & founders** who need fast, self-serve answers from their own data
-- **Analysts & engineers** who want a reusable agentic pattern (SQL + ML + RAG behind one orchestrator) they can point at other datasets
-
-> **Portfolio note:** The bundled sample datasets are intentionally small (~25–30 rows) so you can demo the full pipeline quickly. ML metrics (accuracy, R², silhouette score) illustrate the workflow — they are **not** production-grade model performance. Use your own datasets for meaningful evaluation.
+**[Try the live demo](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/)** — pick a sample dataset in the sidebar and start chatting. A free [Groq API key](https://console.groq.com/) unlocks the full flow (text-to-SQL, summaries, follow-up answers).
 
 ---
 
-## Overview
+## The problem
 
-**Agentic Data Analyst** is a multi-agent Streamlit app that turns tabular data into an interactive analysis workspace:
+Business questions are usually plain English:
 
-1. **Ingest** — Upload a CSV; column names are cleaned, types inferred, and data loaded into SQLite.
-2. **Quality** — Profile missing values, duplicates, outliers, type issues; optional safe auto-clean.
-3. **Query** — Natural-language questions → safe `SELECT`/CTE SQL via Groq LLM.
-4. **Explore & test** — Expanded EDA, statistical tests, and lightweight forecasts.
-5. **Model** — Classification, regression, or clustering with metrics and charts.
-6. **Report** — Downloadable HTML report with an executive summary.
-7. **Remember** — All agent outputs are indexed in ChromaDB for grounded follow-up Q&A (RAG).
-8. **Route** — Orchestrator classifies each message and dispatches it to the right agent.
+- “How many customers churned?”
+- “What’s correlated with price?”
+- “Train a simple model and tell me what mattered.”
+- “Put this in a short report I can send.”
+
+The data is usually a CSV. The bottleneck is the tooling gap between the question and the answer.
 
 ---
 
-## Architecture
+## In simple terms
 
-```mermaid
-flowchart TB
-    subgraph UI["Streamlit UI"]
-        SB[Sidebar: Upload / Schema]
-        CH[Chat Interface]
-    end
+If a recruiter asks “so what does this project actually do?”, here’s how I’d answer.
 
-    ORCH[Orchestrator<br/>rule-based + LLM routing]
+You upload a customer CSV. The app checks quality first (missing values, duplicates, odd types) and lets you clean the safe stuff or skip.
 
-    subgraph Agents
-        QUAL[Quality Agent<br/>profile + safe clean]
-        SQL[SQL Agent<br/>Groq → SELECT/CTE only]
-        ML[ML Agent<br/>EDA + XGBoost / KMeans]
-        STATS[Stats Agent<br/>t-test / ANOVA / corr]
-        FC[Forecast Agent<br/>trend + bands]
-        RPT[Report Agent<br/>HTML export]
-        RAG[RAG Agent<br/>ChromaDB retrieval]
-    end
+Then you ask: **“How many customers churned?”** It turns that into read-only SQL, runs it, and shows the answer.
 
-    subgraph Storage
-        SQLITE[(SQLite<br/>user_data)]
-        CHROMA[(ChromaDB<br/>session collections)]
-    end
+You can keep going in the same chat: correlations, a quick forecast, a model that tries a few algorithms, suggested next questions, or a downloadable HTML report.
 
-    SB --> SQLITE
-    CH --> ORCH
-    ORCH -->|SQL question| SQL
-    ORCH -->|ML / EDA request| ML
-    ORCH -->|Follow-up| RAG
-    SQL --> SQLITE
-    SQL --> RAG
-    ML --> RAG
-    RAG --> CHROMA
+Later you can ask: **“What were the key findings?”** It looks back at what it already computed in this session and answers from that, instead of starting from zero.
+
+That’s the whole idea: one upload, one chat, several kinds of analysis without hopping tools.
+
+---
+
+## What I built
+
+### Quality check before analysis
+
+After upload, you get a quality score out of 100, plus missing values, duplicates, type issues, and outliers. Safe auto-clean is optional (median/mode fill, drop exact duplicates, cast numbers stored as text). Ambiguous choices — like whether `US` and `USA` should merge, or whether a column looks like an ID — are shown for you to decide. Nothing ambiguous is auto-decided.
+
+**Why it helps:** You see whether the file is trustworthy before you trust the answers.
+
+### Plain-English questions → read-only SQL
+
+Counts, filters, rankings, joins across multiple uploaded CSVs, including CTEs and window functions when needed. Only `SELECT` / `WITH … SELECT` runs; write/DDL-style statements are blocked before execution.
+
+**Why it helps:** Someone who doesn’t write SQL can still get facts from the table.
+
+### Charts, stats, and light forecasts
+
+Descriptive stats, correlation views, group charts, Welch t-test / ANOVA with plain-English caveats, and simple linear-trend forecasts with uncertainty bands when dates exist.
+
+**Why it helps:** Exploration and basic testing stay in the same place as the chat.
+
+### AutoML on the session data
+
+For classification and regression it tries a small set of models (for example logistic regression / Ridge, random forest, XGBoost), does a light search, and explains which features the winning model leaned on. Clustering is available when there’s no clear target. This is exploratory on the uploaded data — not a deployment pipeline.
+
+**Why it helps:** You can ask “what predicts churn?” without standing up a separate ML project.
+
+### Session memory for follow-ups
+
+Successful results from cleaning, SQL, ML, stats, forecasts, and reports are indexed so later questions can cite prior findings from this session.
+
+**Why it helps:** Analysis becomes a conversation instead of a one-shot export.
+
+### Shareable HTML report
+
+You can generate a downloadable HTML report with an executive summary of the session so far.
+
+**Why it helps:** Handy when you need something to send, not just a chat transcript.
+
+---
+
+## A few numbers
+
+Things you can verify in this repo:
+
+| | |
+| --- | --- |
+| Specialist agents behind the chat | **8** (SQL, ML, quality, stats, forecast, insight, report, session follow-up) |
+| Chat routes the orchestrator knows | **9** (those eight + a general fallback) |
+| Sample CSVs | **2** (`customer_churn.csv` 30 rows / 9 columns; `house_prices.csv` 25 rows / 10 columns) |
+| Named checks in `self_test.py` | **20** test functions |
+| Pytest unit tests in CI | **4** (`tests/test_llm_usage.py`, run on PRs) |
+| Documented self-test run (see `BUGFIX_LOG.md`) | **179** passed, **0** failed, **10** skipped (LLM paths without API key) |
+| Forbidden SQL keyword patterns blocked | **17** |
+| Classification AutoML candidate families | **3** (logistic regression, random forest, XGBoost) |
+| Insight suggestions per request | **3–5** |
+| Python | **3.11+** |
+| License | **MIT** |
+| Live demo | Streamlit Cloud link above |
+
+Sample datasets are intentionally small so the full pipeline is easy to demo. Model metrics on 25–30 rows illustrate the workflow; they are not production-grade performance.
+
+---
+
+## Why this matters
+
+The useful part isn’t another chatbot wrapped around a spreadsheet.
+
+It’s reducing the gap between “I have a CSV” and “I got a careful answer, a chart, and something I can share” — without requiring SQL, notebook, or ML setup first.
+
+---
+
+## How it works
+
+```text
+Upload CSV(s)
+  ↓
+Quality gate (optional clean / decisions)
+  ↓
+Ask in plain English
+  ↓
+Orchestrator picks a route
+  ↓
+Specialist agent runs (SQL / ML / stats / …)
+  ↓
+Result shown in chat (+ charts / tables when relevant)
+  ↓
+Useful outputs indexed for later follow-ups
+  ↓
+Optional HTML report
 ```
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                   Streamlit UI (app.py)                       │
-│     Sidebar: upload · schema        Main: unified chat        │
-└────────────────────────────┬─────────────────────────────────┘
-                             │
-                  ┌──────────▼──────────┐
-                  │    Orchestrator     │
-                  │  classify → route   │
-                  └──────────┬──────────┘
-         ┌───────────────────┼───────────────────┐
-         ▼                   ▼                   ▼
-   ┌───────────┐      ┌────────────┐      ┌────────────┐
-   │ SQL Agent │      │  ML Agent  │      │ RAG Agent  │
-   │ Groq LLM  │      │ sklearn/XGB│      │  ChromaDB  │
-   │ SQLite    │      │ Plotly EDA │      │  MiniLM    │
-   └───────────┘      └────────────┘      └────────────┘
-```
+Details for engineers are below (install, run, stack).
 
 ---
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | Streamlit |
-| **Database** | SQLite + SQLAlchemy |
-| **ML** | pandas, scikit-learn, XGBoost |
-| **Vector DB** | ChromaDB (persistent, local) |
-| **Embeddings** | HuggingFace `all-MiniLM-L6-v2` |
-| **LLM** | Groq `llama-3.3-70b-versatile` |
-| **Charts** | Plotly |
-| **Config** | python-dotenv (`.env` in project root) |
-
----
-
-## Quick Start
-
-**Try it live (no setup needed):** [agentic-data-analyst on Streamlit Cloud](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/) — pick a sample dataset from the sidebar and start chatting.  
-**Or run locally:** follow the steps below.
+## Install and run
 
 ### Prerequisites
 
 - Python 3.11 or newer
-- A free [Groq API key](https://console.groq.com/)
+- A free [Groq API key](https://console.groq.com/) for text-to-SQL, LLM summaries, and follow-up answers (ingestion, EDA charts, and local model training still work without it)
 
-### 1. Clone and install
+### Setup
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/nishanttyagi28/agentic-data-analyst.git
 cd agentic-data-analyst
 python -m venv venv
-
-# Windows
-venv\Scripts\activate
-# macOS / Linux
-source venv/bin/activate
-
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env              # Windows: copy .env.example .env
+# edit .env and set GROQ_API_KEY=...
 ```
 
-### 2. Configure API key (recommended)
-
-```bash
-# macOS / Linux
-cp .env.example .env
-
-# Windows
-copy .env.example .env
-```
-
-Edit `.env` and replace the placeholder:
-
-```env
-GROQ_API_KEY=gsk_your_actual_key_here
-```
-
-The app loads this automatically — no need to set PowerShell `$env:` each session.
-
-### 3. Run locally
+### Run
 
 ```bash
 python -m streamlit run app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501).
+Open [http://localhost:8501](http://localhost:8501). Upload a CSV or pick a sample dataset, then ask questions in the chat.
 
-### 4. Try it
-
-Select a sample dataset from the sidebar, then ask:
-
-| Type | Example prompt |
-|------|----------------|
-| SQL | *"How many customers churned?"* |
-| ML | *"Train a model to predict churn"* |
-| RAG | *"What were the key findings?"* (after prior queries) |
-
----
-
-## Sample Data
-
-| File | Rows | Task type | Target column |
-|------|------|-----------|---------------|
-| `sample_data/customer_churn.csv` | 30 | Classification | `churn` |
-| `sample_data/house_prices.csv` | 25 | Regression | `price` |
-
-These files exist to demonstrate ingestion → SQL → ML → RAG end-to-end. Expect high variance in metrics at this scale.
-
----
-
-## Project Structure
-
-```
-agentic-data-analyst/
-├── app.py                  # Streamlit entrypoint
-├── agents/
-│   ├── ingestion.py        # CSV → SQLite
-│   ├── sql_agent.py        # Text-to-SQL + safety guard
-│   ├── ml_agent.py         # EDA + auto ML
-│   ├── rag_agent.py        # ChromaDB RAG
-│   ├── orchestrator.py     # Query routing
-│   └── llm_client.py       # Groq client
-├── db/database.py          # SQLAlchemy helpers
-├── utils/
-│   ├── env.py              # .env loading (project root)
-│   ├── chunking.py         # RAG text chunking
-│   └── charts.py           # Plotly EDA charts
-├── sample_data/            # Demo CSVs
-├── self_test.py            # End-to-end test script
-├── requirements.txt        # Pinned dependencies
-├── .env.example            # API key template (committed)
-├── DECISIONS.md            # Design decisions log
-└── FINAL_REPORT.md         # Build summary
-```
-
----
-
-## Deployment (Streamlit Community Cloud)
-
-1. Push this repo to GitHub (do **not** commit `.env`).
-2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → select repo, branch, `app.py`.
-3. Under **Advanced settings → Secrets**, add:
-
-   ```toml
-   GROQ_API_KEY = "gsk_your_actual_key_here"
-   ```
-
-4. Deploy. First RAG use downloads the embedding model (~90 MB).
-
-For other hosts (Railway, Fly.io, Docker), set `GROQ_API_KEY` as an environment variable or mount a `.env` file.
-
----
-
-## Safety & Guardrails
-
-- Only `SELECT` SQL is executed — `INSERT`/`UPDATE`/`DELETE`/`DROP` are blocked by regex
-- Missing or placeholder API key shows a sidebar warning; the app does not crash
-- Errors are caught and surfaced inline in chat
-
----
-
-## Development
+### Tests
 
 ```bash
-# Run self-tests (LLM tests skipped without a valid GROQ_API_KEY)
+# CI-focused unit tests (no API key required)
+python -m pytest -q tests/test_llm_usage.py
+
+# Broader end-to-end script (LLM steps skip without GROQ_API_KEY)
 python self_test.py
 ```
 
+### Streamlit Community Cloud
+
+1. Push the repo (do not commit `.env`).
+2. Create an app pointed at `app.py`.
+3. Add `GROQ_API_KEY` under Secrets.
+4. First follow-up / embedding use downloads the local embedding model (~90 MB).
+
 ---
+
+## Tech (lower half)
+
+| Layer | Choice |
+| --- | --- |
+| UI | Streamlit |
+| Database | SQLite + SQLAlchemy |
+| Routing | Custom orchestrator (rules first, LLM fallback) — not LangGraph |
+| LLM | Groq `llama-3.3-70b-versatile` |
+| ML | pandas, scikit-learn, XGBoost, Plotly |
+| Session follow-up index | ChromaDB + HuggingFace `all-MiniLM-L6-v2` |
+| Config | `python-dotenv` (`.env` in project root) |
+
+### Project layout
+
+```text
+agentic-data-analyst/
+├── app.py                 # Streamlit entrypoint
+├── agents/                # specialists + orchestrator
+├── db/                    # SQLite helpers
+├── utils/                 # env, chunking, charts
+├── sample_data/           # demo CSVs
+├── tests/                 # pytest unit tests (CI)
+├── self_test.py           # broader self-check script
+├── requirements.txt
+├── DECISIONS.md           # design choices
+├── BUGFIX_LOG.md          # verified fixes + self-test counts
+└── FINAL_REPORT.md        # build notes
+```
+
+### Safety notes
+
+- Only read-only SQL is executed.
+- Missing or placeholder API key shows a sidebar warning; the app should not crash.
+- Agent errors are surfaced in chat.
+- AutoML here is exploratory on session data, not monitoring, fairness audits, or production training pipelines.
+- Stats and correlations are association-based; they do not prove causation.
+
+---
+
+## Status
+
+**WIP · portfolio project · actively refined.**
+
+Useful today for demos and local exploration on your own CSVs. Sample rows are tiny on purpose. Schemas and agent behavior may still move. I’m not calling this a finished product or a replacement for a data team.
 
 ## License
 
-[MIT](LICENSE)
+MIT. See [LICENSE](LICENSE).
