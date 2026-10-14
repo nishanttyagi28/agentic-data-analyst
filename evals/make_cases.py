@@ -63,6 +63,21 @@ add(h, "How many houses have 4 or more bedrooms?", int((house.bedrooms >= 4).sum
 add(h, "What is the correlation between sqft_living and price?",
     float(house.sqft_living.corr(house.price)), tol=0.02)
 
+
+add(c, "How many customers have tenure under 12 months?", int((churn.tenure_months < 12).sum()))
+add(c, "What is the median monthly charge?", float(churn.monthly_charges.median()))
+add(c, "How many customers pay by Electronic check?", int((churn.payment_method == "Electronic check").sum()))
+add(c, "What is the average age of customers who churned?", float(churn.loc[churn.churn == "Yes", "age"].mean()))
+add(c, "Which internet service has the most customers?", churn.internet_service.value_counts().idxmax(), "text")
+add(c, "How many customers are on a Two year contract?", int((churn.contract_type == "Two year").sum()))
+
+add(h, "What is the lowest house price?", int(house.price.min()))
+add(h, "What is the average number of bedrooms?", float(house.bedrooms.mean()))
+add(h, "How many houses have 2 or more bathrooms?", int((house.bathrooms >= 2).sum()))
+add(h, "Which neighborhood has the most houses?", house.neighborhood.value_counts().idxmax(), "text")
+add(h, "What is the average lot size in sqft?", float(house.sqft_lot.mean()))
+add(h, "How many houses are under 10 years old?", int((house.age < 10).sum()))
+
 out = Path(__file__).with_name("cases.jsonl")
 with out.open("w") as f:
     for row in cases:
