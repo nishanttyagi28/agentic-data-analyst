@@ -124,7 +124,7 @@ Hand-written cases (ids `manual_01`–`manual_10`) go in `evals/cases_manual.jso
 | `auto_34` | `house_prices.csv` | What is the correlation between sqft_living and price? | 0.99 |
 | `auto_35` | `customer_churn.csv` | How many customers have tenure under 12 months? | 6 |
 | `auto_36` | `customer_churn.csv` | What is the median monthly charge? | 63.2 |
-| `auto_37` | `customer_churn.csv` | How many customers pay by Electronic check? | 0 |
+| `auto_37` | `customer_churn.csv` | How many customers pay by Electronic? | 8 |
 | `auto_38` | `customer_churn.csv` | What is the average age of customers who churned? | 33.0 |
 | `auto_39` | `customer_churn.csv` | Which internet service has the most customers? | Fiber optic |
 | `auto_40` | `customer_churn.csv` | How many customers are on a Two year contract? | 7 |

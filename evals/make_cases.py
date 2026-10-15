@@ -66,7 +66,7 @@ add(h, "What is the correlation between sqft_living and price?",
 
 add(c, "How many customers have tenure under 12 months?", int((churn.tenure_months < 12).sum()))
 add(c, "What is the median monthly charge?", float(churn.monthly_charges.median()))
-add(c, "How many customers pay by Electronic check?", int((churn.payment_method == "Electronic check").sum()))
+add(c, "How many customers pay by Electronic?", int((churn.payment_method == "Electronic").sum()))
 add(c, "What is the average age of customers who churned?", float(churn.loc[churn.churn == "Yes", "age"].mean()))
 add(c, "Which internet service has the most customers?", churn.internet_service.value_counts().idxmax(), "text")
 add(c, "How many customers are on a Two year contract?", int((churn.contract_type == "Two year").sum()))
