@@ -5,15 +5,48 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-space
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: Check config
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE" ]; then
+            echo "::error::set the HF_TOKEN secret and the HF_SPACE variable (owner/space-name)"
+            exit 1
+          fi
+
+      # the space reads its config from the README front matter; add it only
+      # on the deploy commit so the github readme stays clean
+      - name: Build space snapshot
+        run: |
+          {
+            printf -- '---\ntitle: Agentic Data Analyst\nemoji: 📊\ncolorFrom: blue\ncolorTo: green\n'
+            printf -- 'sdk: docker\napp_port: 7860\nlicense: mit\n---\n\n'
+            cat README.md
+          } > README.space.md
+          mv README.space.md README.md
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan space-deploy
+          git add -A
+          git commit -q -m "deploy ${GITHUB_SHA::7}"
+
       - name: Push to space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE: ${{ vars.HF_SPACE }}
-        run: git push --force https://user:$HF_TOKEN@huggingface.co/spaces/$HF_SPACE HEAD:main
+        run: |
+          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" space-deploy:main
