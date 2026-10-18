@@ -1,12 +1,18 @@
 FROM python:3.11-slim
 
-WORKDIR /app
-ENV PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
+# hf spaces run the container as uid 1000, so the app dir must be writable
+# by that user (sqlite and chroma write under ./data)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user PATH=/home/user/.local/bin:$PATH \
+    PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+WORKDIR /home/user/app
 
-COPY . .
+COPY --chown=user requirements.txt .
+RUN pip install --user -r requirements.txt
+
+COPY --chown=user . .
 
 # hf spaces expects the app on 7860
 EXPOSE 7860
