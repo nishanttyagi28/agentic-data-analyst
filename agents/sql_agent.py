@@ -170,9 +170,13 @@ def is_safe_select(sql: str) -> tuple[bool, str]:
 
 def extract_sql_from_response(response: str) -> str:
     """Extract SQL from LLM response, handling markdown code blocks and CTEs."""
-    code_block = re.search(r"```(?:sql)?\s*(.*?)```", response, re.DOTALL | re.IGNORECASE)
-    if code_block:
-        return code_block.group(1).strip().rstrip(";")
+    # some models (gpt-oss, qwen) can put their reasoning inline before the answer
+    response = re.sub(r"<think>.*?(</think>|$)", "", response, flags=re.DOTALL | re.IGNORECASE)
+    blocks = re.findall(r"```[ \t]*(?:sqlite|sql)?[ \t]*\n?(.*?)```", response, re.DOTALL | re.IGNORECASE)
+    sql_blocks = [b for b in blocks if re.match(r"\s*(SELECT|WITH)\b", b, re.IGNORECASE)]
+    if sql_blocks or blocks:
+        # the final block is the answer; earlier ones are usually drafts
+        return (sql_blocks or blocks)[-1].strip().rstrip(";").strip()
 
     # Prefer full WITH ... SELECT CTEs over the first inner SELECT
     with_match = re.search(r"(WITH\b.+)", response, re.DOTALL | re.IGNORECASE)
