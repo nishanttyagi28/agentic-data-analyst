@@ -16,6 +16,15 @@ house = pd.read_csv(ROOT / "sample_data" / "house_prices.csv")
 cases = []
 
 
+def top(series, lowest=False):
+    """idxmax/idxmin, but refuse ties so the expected answer is unambiguous."""
+    best = series.min() if lowest else series.max()
+    winners = series[series == best].index.tolist()
+    if len(winners) != 1:
+        raise ValueError(f"tie for {'lowest' if lowest else 'highest'}: {winners}")
+    return winners[0]
+
+
 def add(dataset, question, expected, kind="number", tol=0.01):
     if isinstance(expected, float):
         expected = round(expected, 2)
@@ -36,16 +45,17 @@ add(c, "What is the churn rate in percent?", float((churn.churn == "Yes").mean()
 add(c, "What is the average monthly charge?", float(churn.monthly_charges.mean()))
 add(c, "What is the average tenure in months?", float(churn.tenure_months.mean()))
 add(c, "What is the total of total_charges across all customers?", float(churn.total_charges.sum()))
-add(c, "Which contract type has the most customers?", churn.contract_type.value_counts().idxmax(), "text")
+add(c, "Which contract type has the most customers?", top(churn.contract_type.value_counts()), "text")
 rate = churn.assign(y=churn.churn.eq("Yes")).groupby("contract_type").y.mean()
-add(c, "Which contract type has the highest churn rate?", rate.idxmax(), "text")
+add(c, "Which contract type has the highest churn rate?", top(rate), "text")
 add(c, "What is the churn rate in percent for Month-to-month contracts?",
     float(rate.get("Month-to-month", 0) * 100))
 add(c, "What is the average monthly charge for customers who churned?",
     float(churn.loc[churn.churn == "Yes", "monthly_charges"].mean()))
 add(c, "How many customers use Fiber optic internet?", int((churn.internet_service == "Fiber optic").sum()))
 add(c, "What is the age of the oldest customer?", int(churn.age.max()))
-add(c, "Which payment method is used most?", churn.payment_method.value_counts().idxmax(), "text")
+add(c, "Which payment method do most churned customers use?",
+    top(churn.loc[churn.churn == "Yes", "payment_method"].value_counts()), "text")
 
 h = "house_prices.csv"
 add(h, "How many houses are in the dataset?", int(len(house)))
@@ -53,7 +63,7 @@ add(h, "What is the average house price?", float(house.price.mean()))
 add(h, "What is the median house price?", float(house.price.median()))
 add(h, "What is the highest house price?", int(house.price.max()))
 add(h, "Which neighborhood has the highest average price?",
-    house.groupby("neighborhood").price.mean().idxmax(), "text")
+    top(house.groupby("neighborhood").price.mean()), "text")
 add(h, "How many houses are waterfront?", int((house.waterfront == 1).sum()))
 add(h, "What is the average price of waterfront houses?",
     float(house.loc[house.waterfront == 1, "price"].mean()))
@@ -68,13 +78,13 @@ add(c, "How many customers have tenure under 12 months?", int((churn.tenure_mont
 add(c, "What is the median monthly charge?", float(churn.monthly_charges.median()))
 add(c, "How many customers pay by Electronic?", int((churn.payment_method == "Electronic").sum()))
 add(c, "What is the average age of customers who churned?", float(churn.loc[churn.churn == "Yes", "age"].mean()))
-add(c, "Which internet service has the most customers?", churn.internet_service.value_counts().idxmax(), "text")
+add(c, "Which internet service has the most customers?", top(churn.internet_service.value_counts()), "text")
 add(c, "How many customers are on a Two year contract?", int((churn.contract_type == "Two year").sum()))
 
 add(h, "What is the lowest house price?", int(house.price.min()))
 add(h, "What is the average number of bedrooms?", float(house.bedrooms.mean()))
 add(h, "How many houses have 2 or more bathrooms?", int((house.bathrooms >= 2).sum()))
-add(h, "Which neighborhood has the most houses?", house.neighborhood.value_counts().idxmax(), "text")
+add(h, "Which neighborhood has the most houses?", top(house.neighborhood.value_counts()), "text")
 add(h, "What is the average lot size in sqft?", float(house.sqft_lot.mean()))
 add(h, "How many houses are under 10 years old?", int((house.age < 10).sum()))
 

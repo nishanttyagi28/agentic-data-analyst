@@ -10,7 +10,7 @@
 {"id": "auto_20", "dataset": "customer_churn.csv", "question": "What is the average monthly charge for customers who churned?", "expected": 49.47, "type": "number", "tolerance": 0.01}
 {"id": "auto_21", "dataset": "customer_churn.csv", "question": "How many customers use Fiber optic internet?", "expected": 16, "type": "number", "tolerance": 0.01}
 {"id": "auto_22", "dataset": "customer_churn.csv", "question": "What is the age of the oldest customer?", "expected": 58, "type": "number", "tolerance": 0.01}
-{"id": "auto_23", "dataset": "customer_churn.csv", "question": "Which payment method is used most?", "expected": "Electronic", "type": "text", "tolerance": null}
+{"id": "auto_23", "dataset": "customer_churn.csv", "question": "Which payment method do most churned customers use?", "expected": "Electronic", "type": "text", "tolerance": null}
 {"id": "auto_24", "dataset": "house_prices.csv", "question": "How many houses are in the dataset?", "expected": 25, "type": "number", "tolerance": 0.01}
 {"id": "auto_25", "dataset": "house_prices.csv", "question": "What is the average house price?", "expected": 406400.0, "type": "number", "tolerance": 0.01}
 {"id": "auto_26", "dataset": "house_prices.csv", "question": "What is the median house price?", "expected": 380000.0, "type": "number", "tolerance": 0.01}
