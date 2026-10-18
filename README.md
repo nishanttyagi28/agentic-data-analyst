@@ -87,7 +87,7 @@ python self_test.py               # end-to-end script; LLM steps skip without GR
 
 CI runs the unit tests on pull requests and pushes to `main`.
 
-To deploy on Streamlit Community Cloud, point a new app at `app.py` and add `GROQ_API_KEY` under Secrets. Don't commit `.env`.
+Deployment is covered in [Deploy](#deploy). Don't commit `.env`.
 
 
 ## Eval cases (pandas ground truth)
@@ -163,14 +163,18 @@ The one live miss was `manual_10`: the query computed the right difference (2957
 | `manual_09` | `house_prices.csv` | What is the average sqft_living of houses with 2 floors? | 2443.75 |
 | `manual_10` | `house_prices.csv` | How much higher is the average waterfront price than the average non-waterfront price? | 295735.29 |
 
-## Hugging Face Space
+## Deploy
 
-Docker Space deploy is wired in `.github/workflows/deploy-space.yml`. On every push to `main` it pushes a snapshot of the repo to the Space, adding the Space config (`sdk: docker`, `app_port: 7860`) to the README on the deploy commit only.
+The live app runs on Streamlit Community Cloud from `main` (URL to be added).
 
-1. Create a free Space named `agentic-data-analyst` with the Docker SDK (blank template).
-2. Add Space secret `GROQ_API_KEY`.
-3. In this GitHub repo, add secret `HF_TOKEN` (write) and variable `HF_SPACE` = `nishanttyagi28/agentic-data-analyst` (or your Space path).
-4. Merge to `main` (or run the workflow manually).
+1. On share.streamlit.io, create an app from this repo, branch `main`, file `app.py`, Python 3.12.
+2. Under Advanced settings → Secrets add `GROQ_API_KEY = "..."` (and optionally `GROQ_MODEL`). The app reads the key from the environment, then `st.secrets`, then `.env`.
+
+`requirements.txt` installs `sentence-transformers`, which pulls in PyTorch. That is a large install for Streamlit Cloud's resource limits, so the first build is slow and memory use is the main thing to watch.
+
+### Optional: Docker / Hugging Face Space
+
+The `Dockerfile` runs the app on port 7860 and works as a plain container (`docker build -t agentic-data-analyst . && docker run -p 7860:7860 -e GROQ_API_KEY=... agentic-data-analyst`). `.github/workflows/deploy-space.yml` can push a snapshot to a Hugging Face Docker Space; it only runs when triggered by hand from the Actions tab. To use it, create a Docker Space, add `GROQ_API_KEY` as a Space secret, then add the repo secret `HF_TOKEN` (write) and repo variable `HF_SPACE` (`owner/space-name`).
 
 
 ## License

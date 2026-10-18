@@ -8,7 +8,7 @@ Agentic Data Analyst is a Streamlit app where you upload CSV files and ask quest
 
 - Python 3.11+, Streamlit, pandas, SQLAlchemy + SQLite, Plotly, scikit-learn, XGBoost, ChromaDB, Groq (`openai/gpt-oss-120b` by default, override with `GROQ_MODEL`).
 - Tests: pytest unit tests under `tests/` (no network; the LLM is faked), broader `self_test.py`.
-- Deploy: Streamlit Community Cloud and Hugging Face Spaces (Docker). GitHub Actions for unit CI and Space deploy.
+- Deploy: Streamlit Community Cloud from `main`. Optional Docker image and a manual-only Hugging Face Space workflow. GitHub Actions runs unit CI.
 
 ## Layout
 
@@ -53,4 +53,4 @@ Agentic Data Analyst is a Streamlit app where you upload CSV files and ask quest
 ## Week 1 scope
 
 - AGENTS.md, Dockerfile, HF Space deploy workflow, 36 scripted + 10 manual pandas eval cases, eval runner, README eval table.
-- Do not merge until review. HF deploy runs after merge to `main`.
+- Do not merge until review. Streamlit Cloud redeploys from `main`; the HF Space workflow is manual.
