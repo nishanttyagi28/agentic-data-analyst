@@ -165,7 +165,7 @@ The one live miss was `manual_10`: the query computed the right difference (2957
 
 ## Deploy
 
-The live app runs on Streamlit Community Cloud from `main` (URL to be added).
+The live app runs on Streamlit Community Cloud from `main` at [agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app](https://agentic-data-analyst-uqjwnx2jwzd2pe9vosnffw.streamlit.app/).
 
 1. On share.streamlit.io, create an app from this repo, branch `main`, file `app.py`, Python 3.12.
 2. Under Advanced settings → Secrets add `GROQ_API_KEY = "..."` (and optionally `GROQ_MODEL`). The app reads the key from the environment, then `st.secrets`, then `.env`.
