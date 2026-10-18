@@ -3,6 +3,7 @@
 Usage:
     python evals/run_evals.py              # all cases, needs GROQ_API_KEY
     python evals/run_evals.py --limit 5
+    python evals/run_evals.py --sleep 10   # pace requests on the free tier
 
 Each case loads its CSV into an in-memory SQLite table, asks the SQL agent the
 question, and compares the first cell of the result with the pandas answer.
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -86,10 +88,16 @@ def run_case(case: dict) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--sleep", type=float, default=0.0,
+                        help="seconds to wait between cases (helps with rate limits)")
     args = parser.parse_args(argv)
 
     cases = load_cases()[: args.limit]
-    results = [run_case(c) for c in cases]
+    results = []
+    for i, case in enumerate(cases):
+        if i and args.sleep:
+            time.sleep(args.sleep)
+        results.append(run_case(case))
     for r in results:
         mark = "PASS" if r["passed"] else "FAIL"
         print(f"{mark} {r['id']}: expected={r['expected']} actual={r['actual']}"
