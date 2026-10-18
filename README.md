@@ -56,7 +56,7 @@ upload CSV(s) -> quality check (optional clean) -> question
   -> answer in chat (+ table/chart) -> result indexed for later follow-ups
 ```
 
-The orchestrator is plain Python, not a framework like LangGraph. LLM calls go to Groq (`llama-3.3-70b-versatile`). Design notes are in [DECISIONS.md](DECISIONS.md), and fixes made along the way are logged in [BUGFIX_LOG.md](BUGFIX_LOG.md).
+The orchestrator is plain Python, not a framework like LangGraph. LLM calls go to Groq (`openai/gpt-oss-120b` by default; set `GROQ_MODEL` to use another Groq model). Design notes are in [DECISIONS.md](DECISIONS.md), and fixes made along the way are logged in [BUGFIX_LOG.md](BUGFIX_LOG.md).
 
 ```text
 app.py          Streamlit entry point
@@ -85,9 +85,97 @@ python -m pytest -q tests/        # unit tests, no API key needed
 python self_test.py               # end-to-end script; LLM steps skip without GROQ_API_KEY
 ```
 
-CI runs the unit tests on pull requests.
+CI runs the unit tests on pull requests and pushes to `main`.
 
-To deploy on Streamlit Community Cloud, point a new app at `app.py` and add `GROQ_API_KEY` under Secrets. Don't commit `.env`.
+Deployment is covered in [Deploy](#deploy). Don't commit `.env`.
+
+
+## Eval cases (pandas ground truth)
+
+46 cases: 36 in `evals/cases.jsonl` (simple counts, averages, group-bys) and 10 harder hand-written ones in `evals/cases_manual.jsonl` (combined filters, conditional rates, differences between groups). Expected answers are computed with pandas from the sample CSVs, never by the model. Re-check them with:
+
+```bash
+python evals/make_cases.py
+python evals/make_manual_cases.py
+```
+
+Run the cases against the SQL agent (needs `GROQ_API_KEY`):
+
+```bash
+python evals/run_evals.py
+```
+
+`tests/test_evals.py` runs every case through the same SQL agent path with a fake LLM that returns a hand-written reference query, so CI checks the loader, the scorer, the SELECT-only guard and that each pandas answer is reachable with SQL, without network or an API key.
+
+| check | result |
+| --- | --- |
+| offline agent path, reference SQL (`pytest tests/test_evals.py`) | 46/46 |
+| live accuracy, Groq `openai/gpt-oss-120b`, 2026-10-18 (`run_evals.py --sleep 8`) | 45/46 |
+
+The one live miss was `manual_10`: the query computed the right difference (295735.29) but returned it as the third column after both averages, and the runner only scores the first cell.
+
+| id | dataset | question | expected |
+| --- | --- | --- | --- |
+| `auto_11` | `customer_churn.csv` | How many customers are in the dataset? | 30 |
+| `auto_12` | `customer_churn.csv` | How many customers churned? | 15 |
+| `auto_13` | `customer_churn.csv` | What is the churn rate in percent? | 50.0 |
+| `auto_14` | `customer_churn.csv` | What is the average monthly charge? | 63.78 |
+| `auto_15` | `customer_churn.csv` | What is the average tenure in months? | 25.23 |
+| `auto_16` | `customer_churn.csv` | What is the total of total_charges across all customers? | 54826.17 |
+| `auto_17` | `customer_churn.csv` | Which contract type has the most customers? | Month-to-month |
+| `auto_18` | `customer_churn.csv` | Which contract type has the highest churn rate? | Month-to-month |
+| `auto_19` | `customer_churn.csv` | What is the churn rate in percent for Month-to-month contracts? | 100.0 |
+| `auto_20` | `customer_churn.csv` | What is the average monthly charge for customers who churned? | 49.47 |
+| `auto_21` | `customer_churn.csv` | How many customers use Fiber optic internet? | 16 |
+| `auto_22` | `customer_churn.csv` | What is the age of the oldest customer? | 58 |
+| `auto_23` | `customer_churn.csv` | Which payment method do most churned customers use? | Electronic |
+| `auto_24` | `house_prices.csv` | How many houses are in the dataset? | 25 |
+| `auto_25` | `house_prices.csv` | What is the average house price? | 406400.0 |
+| `auto_26` | `house_prices.csv` | What is the median house price? | 380000.0 |
+| `auto_27` | `house_prices.csv` | What is the highest house price? | 720000 |
+| `auto_28` | `house_prices.csv` | Which neighborhood has the highest average price? | Lakeside |
+| `auto_29` | `house_prices.csv` | How many houses are waterfront? | 8 |
+| `auto_30` | `house_prices.csv` | What is the average price of waterfront houses? | 607500.0 |
+| `auto_31` | `house_prices.csv` | What is the average sqft_living? | 2062.0 |
+| `auto_32` | `house_prices.csv` | What is the average price per sqft_living? | 193.03 |
+| `auto_33` | `house_prices.csv` | How many houses have 4 or more bedrooms? | 11 |
+| `auto_34` | `house_prices.csv` | What is the correlation between sqft_living and price? | 0.99 |
+| `auto_35` | `customer_churn.csv` | How many customers have tenure under 12 months? | 6 |
+| `auto_36` | `customer_churn.csv` | What is the median monthly charge? | 63.2 |
+| `auto_37` | `customer_churn.csv` | How many customers pay by Electronic? | 8 |
+| `auto_38` | `customer_churn.csv` | What is the average age of customers who churned? | 33.0 |
+| `auto_39` | `customer_churn.csv` | Which internet service has the most customers? | Fiber optic |
+| `auto_40` | `customer_churn.csv` | How many customers are on a Two year contract? | 7 |
+| `auto_41` | `house_prices.csv` | What is the lowest house price? | 180000 |
+| `auto_42` | `house_prices.csv` | What is the average number of bedrooms? | 3.4 |
+| `auto_43` | `house_prices.csv` | How many houses have 2 or more bathrooms? | 20 |
+| `auto_44` | `house_prices.csv` | Which neighborhood has the most houses? | Suburban |
+| `auto_45` | `house_prices.csv` | What is the average lot size in sqft? | 6172.0 |
+| `auto_46` | `house_prices.csv` | How many houses are under 10 years old? | 3 |
+| `manual_01` | `customer_churn.csv` | What percent of Fiber optic customers churned? | 25.0 |
+| `manual_02` | `customer_churn.csv` | How many churned customers were on a Month-to-month contract and paid by Electronic? | 8 |
+| `manual_03` | `customer_churn.csv` | What is the average tenure in months of customers who did not churn? | 37.0 |
+| `manual_04` | `customer_churn.csv` | Which payment method has the highest average monthly charge? | Bank transfer |
+| `manual_05` | `customer_churn.csv` | How many customers are older than 40 and pay more than 70 per month? | 11 |
+| `manual_06` | `house_prices.csv` | What is the average price of 3-bedroom houses? | 330000.0 |
+| `manual_07` | `house_prices.csv` | Which neighborhood has the lowest average price? | Urban |
+| `manual_08` | `house_prices.csv` | How many non-waterfront houses cost more than 400000? | 3 |
+| `manual_09` | `house_prices.csv` | What is the average sqft_living of houses with 2 floors? | 2443.75 |
+| `manual_10` | `house_prices.csv` | How much higher is the average waterfront price than the average non-waterfront price? | 295735.29 |
+
+## Deploy
+
+The live app runs on Streamlit Community Cloud from `main` (URL to be added).
+
+1. On share.streamlit.io, create an app from this repo, branch `main`, file `app.py`, Python 3.12.
+2. Under Advanced settings → Secrets add `GROQ_API_KEY = "..."` (and optionally `GROQ_MODEL`). The app reads the key from the environment, then `st.secrets`, then `.env`.
+
+`requirements.txt` installs `sentence-transformers`, which pulls in PyTorch. That is a large install for Streamlit Cloud's resource limits, so the first build is slow and memory use is the main thing to watch.
+
+### Optional: Docker / Hugging Face Space
+
+The `Dockerfile` runs the app on port 7860 and works as a plain container (`docker build -t agentic-data-analyst . && docker run -p 7860:7860 -e GROQ_API_KEY=... agentic-data-analyst`). `.github/workflows/deploy-space.yml` can push a snapshot to a Hugging Face Docker Space; it only runs when triggered by hand from the Actions tab. To use it, create a Docker Space, add `GROQ_API_KEY` as a Space secret, then add the repo secret `HF_TOKEN` (write) and repo variable `HF_SPACE` (`owner/space-name`).
+
 
 ## License
 

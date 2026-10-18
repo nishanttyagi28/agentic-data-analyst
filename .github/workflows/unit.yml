@@ -2,6 +2,8 @@ name: Agent unit tests
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,7 +18,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      # the unit tests only need the sql path, not the full ml stack
       - name: Install focused test dependencies
-        run: python -m pip install pytest python-dotenv
+        run: python -m pip install pytest python-dotenv pandas sqlalchemy
       - name: Run unit tests
-        run: python -m pytest -q tests/test_llm_usage.py
+        env:
+          GROQ_API_KEY: ""
+        run: python -m pytest -q tests/

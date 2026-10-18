@@ -1,0 +1,10 @@
+{"id": "manual_01", "dataset": "customer_churn.csv", "question": "What percent of Fiber optic customers churned?", "expected": 25.0, "type": "number", "tolerance": 0.01}
+{"id": "manual_02", "dataset": "customer_churn.csv", "question": "How many churned customers were on a Month-to-month contract and paid by Electronic?", "expected": 8, "type": "number", "tolerance": 0.01}
+{"id": "manual_03", "dataset": "customer_churn.csv", "question": "What is the average tenure in months of customers who did not churn?", "expected": 37.0, "type": "number", "tolerance": 0.01}
+{"id": "manual_04", "dataset": "customer_churn.csv", "question": "Which payment method has the highest average monthly charge?", "expected": "Bank transfer", "type": "text", "tolerance": null}
+{"id": "manual_05", "dataset": "customer_churn.csv", "question": "How many customers are older than 40 and pay more than 70 per month?", "expected": 11, "type": "number", "tolerance": 0.01}
+{"id": "manual_06", "dataset": "house_prices.csv", "question": "What is the average price of 3-bedroom houses?", "expected": 330000.0, "type": "number", "tolerance": 0.01}
+{"id": "manual_07", "dataset": "house_prices.csv", "question": "Which neighborhood has the lowest average price?", "expected": "Urban", "type": "text", "tolerance": null}
+{"id": "manual_08", "dataset": "house_prices.csv", "question": "How many non-waterfront houses cost more than 400000?", "expected": 3, "type": "number", "tolerance": 0.01}
+{"id": "manual_09", "dataset": "house_prices.csv", "question": "What is the average sqft_living of houses with 2 floors?", "expected": 2443.75, "type": "number", "tolerance": 0.01}
+{"id": "manual_10", "dataset": "house_prices.csv", "question": "How much higher is the average waterfront price than the average non-waterfront price?", "expected": 295735.29, "type": "number", "tolerance": 0.01}

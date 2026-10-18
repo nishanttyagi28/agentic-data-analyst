@@ -1,0 +1,36 @@
+{"id": "auto_11", "dataset": "customer_churn.csv", "question": "How many customers are in the dataset?", "expected": 30, "type": "number", "tolerance": 0.01}
+{"id": "auto_12", "dataset": "customer_churn.csv", "question": "How many customers churned?", "expected": 15, "type": "number", "tolerance": 0.01}
+{"id": "auto_13", "dataset": "customer_churn.csv", "question": "What is the churn rate in percent?", "expected": 50.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_14", "dataset": "customer_churn.csv", "question": "What is the average monthly charge?", "expected": 63.78, "type": "number", "tolerance": 0.01}
+{"id": "auto_15", "dataset": "customer_churn.csv", "question": "What is the average tenure in months?", "expected": 25.23, "type": "number", "tolerance": 0.01}
+{"id": "auto_16", "dataset": "customer_churn.csv", "question": "What is the total of total_charges across all customers?", "expected": 54826.17, "type": "number", "tolerance": 0.01}
+{"id": "auto_17", "dataset": "customer_churn.csv", "question": "Which contract type has the most customers?", "expected": "Month-to-month", "type": "text", "tolerance": null}
+{"id": "auto_18", "dataset": "customer_churn.csv", "question": "Which contract type has the highest churn rate?", "expected": "Month-to-month", "type": "text", "tolerance": null}
+{"id": "auto_19", "dataset": "customer_churn.csv", "question": "What is the churn rate in percent for Month-to-month contracts?", "expected": 100.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_20", "dataset": "customer_churn.csv", "question": "What is the average monthly charge for customers who churned?", "expected": 49.47, "type": "number", "tolerance": 0.01}
+{"id": "auto_21", "dataset": "customer_churn.csv", "question": "How many customers use Fiber optic internet?", "expected": 16, "type": "number", "tolerance": 0.01}
+{"id": "auto_22", "dataset": "customer_churn.csv", "question": "What is the age of the oldest customer?", "expected": 58, "type": "number", "tolerance": 0.01}
+{"id": "auto_23", "dataset": "customer_churn.csv", "question": "Which payment method do most churned customers use?", "expected": "Electronic", "type": "text", "tolerance": null}
+{"id": "auto_24", "dataset": "house_prices.csv", "question": "How many houses are in the dataset?", "expected": 25, "type": "number", "tolerance": 0.01}
+{"id": "auto_25", "dataset": "house_prices.csv", "question": "What is the average house price?", "expected": 406400.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_26", "dataset": "house_prices.csv", "question": "What is the median house price?", "expected": 380000.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_27", "dataset": "house_prices.csv", "question": "What is the highest house price?", "expected": 720000, "type": "number", "tolerance": 0.01}
+{"id": "auto_28", "dataset": "house_prices.csv", "question": "Which neighborhood has the highest average price?", "expected": "Lakeside", "type": "text", "tolerance": null}
+{"id": "auto_29", "dataset": "house_prices.csv", "question": "How many houses are waterfront?", "expected": 8, "type": "number", "tolerance": 0.01}
+{"id": "auto_30", "dataset": "house_prices.csv", "question": "What is the average price of waterfront houses?", "expected": 607500.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_31", "dataset": "house_prices.csv", "question": "What is the average sqft_living?", "expected": 2062.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_32", "dataset": "house_prices.csv", "question": "What is the average price per sqft_living?", "expected": 193.03, "type": "number", "tolerance": 0.01}
+{"id": "auto_33", "dataset": "house_prices.csv", "question": "How many houses have 4 or more bedrooms?", "expected": 11, "type": "number", "tolerance": 0.01}
+{"id": "auto_34", "dataset": "house_prices.csv", "question": "What is the correlation between sqft_living and price?", "expected": 0.99, "type": "number", "tolerance": 0.02}
+{"id": "auto_35", "dataset": "customer_churn.csv", "question": "How many customers have tenure under 12 months?", "expected": 6, "type": "number", "tolerance": 0.01}
+{"id": "auto_36", "dataset": "customer_churn.csv", "question": "What is the median monthly charge?", "expected": 63.2, "type": "number", "tolerance": 0.01}
+{"id": "auto_37", "dataset": "customer_churn.csv", "question": "How many customers pay by Electronic?", "expected": 8, "type": "number", "tolerance": 0.01}
+{"id": "auto_38", "dataset": "customer_churn.csv", "question": "What is the average age of customers who churned?", "expected": 33.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_39", "dataset": "customer_churn.csv", "question": "Which internet service has the most customers?", "expected": "Fiber optic", "type": "text", "tolerance": null}
+{"id": "auto_40", "dataset": "customer_churn.csv", "question": "How many customers are on a Two year contract?", "expected": 7, "type": "number", "tolerance": 0.01}
+{"id": "auto_41", "dataset": "house_prices.csv", "question": "What is the lowest house price?", "expected": 180000, "type": "number", "tolerance": 0.01}
+{"id": "auto_42", "dataset": "house_prices.csv", "question": "What is the average number of bedrooms?", "expected": 3.4, "type": "number", "tolerance": 0.01}
+{"id": "auto_43", "dataset": "house_prices.csv", "question": "How many houses have 2 or more bathrooms?", "expected": 20, "type": "number", "tolerance": 0.01}
+{"id": "auto_44", "dataset": "house_prices.csv", "question": "Which neighborhood has the most houses?", "expected": "Suburban", "type": "text", "tolerance": null}
+{"id": "auto_45", "dataset": "house_prices.csv", "question": "What is the average lot size in sqft?", "expected": 6172.0, "type": "number", "tolerance": 0.01}
+{"id": "auto_46", "dataset": "house_prices.csv", "question": "How many houses are under 10 years old?", "expected": 3, "type": "number", "tolerance": 0.01}
