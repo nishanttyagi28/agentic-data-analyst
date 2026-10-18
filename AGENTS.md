@@ -6,7 +6,7 @@ Agentic Data Analyst is a Streamlit app where you upload CSV files and ask quest
 
 ## Stack
 
-- Python 3.11+, Streamlit, pandas, SQLAlchemy + SQLite, Plotly, scikit-learn, XGBoost, ChromaDB, Groq (`llama-3.3-70b-versatile`).
+- Python 3.11+, Streamlit, pandas, SQLAlchemy + SQLite, Plotly, scikit-learn, XGBoost, ChromaDB, Groq (`openai/gpt-oss-120b` by default, override with `GROQ_MODEL`).
 - Tests: pytest unit tests under `tests/` (no network; the LLM is faked), broader `self_test.py`.
 - Deploy: Streamlit Community Cloud and Hugging Face Spaces (Docker). GitHub Actions for unit CI and Space deploy.
 

@@ -48,7 +48,7 @@
 
 ## LLM
 
-18. **Groq `llama-3.3-70b-versatile`** — Used for SQL generation, explanations, ML summaries, RAG answers, orchestration classification, and report executive summaries.
+18. **Groq `openai/gpt-oss-120b`** (was `llama-3.3-70b-versatile`, not available on the Groq account any more; override with `GROQ_MODEL`) — Used for SQL generation, explanations, ML summaries, RAG answers, orchestration classification, and report executive summaries.
 
 19. **Graceful API key fallback** — App runs without key; sidebar warning + agent-level errors instead of crashes.
 

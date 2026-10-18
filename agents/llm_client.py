@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+import os
 import re
 import time
 from typing import Iterator
@@ -13,7 +14,7 @@ from utils.env import ENV_FILE, get_groq_api_key, load_project_env
 
 load_project_env()
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 _client = None
 _cached_key: str | None = None
 
@@ -61,10 +62,11 @@ def _record_usage(response: object) -> None:
 
 
 def _rate_limit_delay(error: Exception, attempt: int) -> float | None:
-    """Return retry delay for provider 429 errors, otherwise None."""
+    """Return retry delay for provider rate limits (429, and 413 when a request
+    is over the tokens-per-minute budget), otherwise None."""
     status = getattr(error, "status_code", None)
     message = str(error)
-    if status != 429 and "429" not in message:
+    if status not in (429, 413) and not re.search(r"\b(429|413)\b", message):
         return None
     response = getattr(error, "response", None)
     headers = getattr(response, "headers", {}) or {}
