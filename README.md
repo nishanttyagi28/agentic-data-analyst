@@ -56,7 +56,7 @@ upload CSV(s) -> quality check (optional clean) -> question
   -> answer in chat (+ table/chart) -> result indexed for later follow-ups
 ```
 
-The orchestrator is plain Python, not a framework like LangGraph. LLM calls go to Groq (`llama-3.3-70b-versatile`). Design notes are in [DECISIONS.md](DECISIONS.md), and fixes made along the way are logged in [BUGFIX_LOG.md](BUGFIX_LOG.md).
+The orchestrator is plain Python, not a framework like LangGraph. LLM calls go to Groq (`openai/gpt-oss-120b` by default; set `GROQ_MODEL` to use another Groq model). Design notes are in [DECISIONS.md](DECISIONS.md), and fixes made along the way are logged in [BUGFIX_LOG.md](BUGFIX_LOG.md).
 
 ```text
 app.py          Streamlit entry point
@@ -110,7 +110,9 @@ python evals/run_evals.py
 | check | result |
 | --- | --- |
 | offline agent path, reference SQL (`pytest tests/test_evals.py`) | 46/46 |
-| live accuracy, Groq `llama-3.3-70b-versatile` (`run_evals.py`) | pending live run |
+| live accuracy, Groq `openai/gpt-oss-120b`, 2026-10-18 (`run_evals.py --sleep 8`) | 45/46 |
+
+The one live miss was `manual_10`: the query computed the right difference (295735.29) but returned it as the third column after both averages, and the runner only scores the first cell.
 
 | id | dataset | question | expected |
 | --- | --- | --- | --- |
