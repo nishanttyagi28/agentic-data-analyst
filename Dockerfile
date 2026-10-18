@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # hf spaces run the container as uid 1000, so the app dir must be writable
 # by that user (sqlite and chroma write under ./data)
