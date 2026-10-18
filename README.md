@@ -85,16 +85,32 @@ python -m pytest -q tests/        # unit tests, no API key needed
 python self_test.py               # end-to-end script; LLM steps skip without GROQ_API_KEY
 ```
 
-CI runs the unit tests on pull requests.
+CI runs the unit tests on pull requests and pushes to `main`.
 
 To deploy on Streamlit Community Cloud, point a new app at `app.py` and add `GROQ_API_KEY` under Secrets. Don't commit `.env`.
 
 
 ## Eval cases (pandas ground truth)
 
-These cases live in `evals/cases.jsonl`. Expected answers are computed with pandas from the sample CSVs, so you can re-check them any time with `python evals/make_cases.py`.
+46 cases: 36 in `evals/cases.jsonl` (simple counts, averages, group-bys) and 10 harder hand-written ones in `evals/cases_manual.jsonl` (combined filters, conditional rates, differences between groups). Expected answers are computed with pandas from the sample CSVs, never by the model. Re-check them with:
 
-Hand-written cases (ids `manual_01`–`manual_10`) go in `evals/cases_manual.jsonl` when you add them.
+```bash
+python evals/make_cases.py
+python evals/make_manual_cases.py
+```
+
+Run the cases against the SQL agent (needs `GROQ_API_KEY`):
+
+```bash
+python evals/run_evals.py
+```
+
+`tests/test_evals.py` runs every case through the same SQL agent path with a fake LLM that returns a hand-written reference query, so CI checks the loader, the scorer, the SELECT-only guard and that each pandas answer is reachable with SQL, without network or an API key.
+
+| check | result |
+| --- | --- |
+| offline agent path, reference SQL (`pytest tests/test_evals.py`) | 46/46 |
+| live accuracy, Groq `llama-3.3-70b-versatile` (`run_evals.py`) | pending live run |
 
 | id | dataset | question | expected |
 | --- | --- | --- | --- |
@@ -110,7 +126,7 @@ Hand-written cases (ids `manual_01`–`manual_10`) go in `evals/cases_manual.jso
 | `auto_20` | `customer_churn.csv` | What is the average monthly charge for customers who churned? | 49.47 |
 | `auto_21` | `customer_churn.csv` | How many customers use Fiber optic internet? | 16 |
 | `auto_22` | `customer_churn.csv` | What is the age of the oldest customer? | 58 |
-| `auto_23` | `customer_churn.csv` | Which payment method is used most? | Electronic |
+| `auto_23` | `customer_churn.csv` | Which payment method do most churned customers use? | Electronic |
 | `auto_24` | `house_prices.csv` | How many houses are in the dataset? | 25 |
 | `auto_25` | `house_prices.csv` | What is the average house price? | 406400.0 |
 | `auto_26` | `house_prices.csv` | What is the median house price? | 380000.0 |
@@ -134,12 +150,22 @@ Hand-written cases (ids `manual_01`–`manual_10`) go in `evals/cases_manual.jso
 | `auto_44` | `house_prices.csv` | Which neighborhood has the most houses? | Suburban |
 | `auto_45` | `house_prices.csv` | What is the average lot size in sqft? | 6172.0 |
 | `auto_46` | `house_prices.csv` | How many houses are under 10 years old? | 3 |
+| `manual_01` | `customer_churn.csv` | What percent of Fiber optic customers churned? | 25.0 |
+| `manual_02` | `customer_churn.csv` | How many churned customers were on a Month-to-month contract and paid by Electronic? | 8 |
+| `manual_03` | `customer_churn.csv` | What is the average tenure in months of customers who did not churn? | 37.0 |
+| `manual_04` | `customer_churn.csv` | Which payment method has the highest average monthly charge? | Bank transfer |
+| `manual_05` | `customer_churn.csv` | How many customers are older than 40 and pay more than 70 per month? | 11 |
+| `manual_06` | `house_prices.csv` | What is the average price of 3-bedroom houses? | 330000.0 |
+| `manual_07` | `house_prices.csv` | Which neighborhood has the lowest average price? | Urban |
+| `manual_08` | `house_prices.csv` | How many non-waterfront houses cost more than 400000? | 3 |
+| `manual_09` | `house_prices.csv` | What is the average sqft_living of houses with 2 floors? | 2443.75 |
+| `manual_10` | `house_prices.csv` | How much higher is the average waterfront price than the average non-waterfront price? | 295735.29 |
 
 ## Hugging Face Space
 
-Docker Space deploy is wired in `.github/workflows/deploy-space.yml` (pushes `main` to the Space).
+Docker Space deploy is wired in `.github/workflows/deploy-space.yml`. On every push to `main` it pushes a snapshot of the repo to the Space, adding the Space config (`sdk: docker`, `app_port: 7860`) to the README on the deploy commit only.
 
-1. Create a free Docker Space named `agentic-data-analyst`.
+1. Create a free Space named `agentic-data-analyst` with the Docker SDK (blank template).
 2. Add Space secret `GROQ_API_KEY`.
 3. In this GitHub repo, add secret `HF_TOKEN` (write) and variable `HF_SPACE` = `nishanttyagi28/agentic-data-analyst` (or your Space path).
 4. Merge to `main` (or run the workflow manually).

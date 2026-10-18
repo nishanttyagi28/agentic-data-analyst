@@ -7,7 +7,7 @@ Agentic Data Analyst is a Streamlit app where you upload CSV files and ask quest
 ## Stack
 
 - Python 3.11+, Streamlit, pandas, SQLAlchemy + SQLite, Plotly, scikit-learn, XGBoost, ChromaDB, Groq (`llama-3.3-70b-versatile`).
-- Tests: pytest unit tests under `tests/`, broader `self_test.py`.
+- Tests: pytest unit tests under `tests/` (no network; the LLM is faked), broader `self_test.py`.
 - Deploy: Streamlit Community Cloud and Hugging Face Spaces (Docker). GitHub Actions for unit CI and Space deploy.
 
 ## Layout
@@ -19,11 +19,13 @@ Agentic Data Analyst is a Streamlit app where you upload CSV files and ask quest
 
 ## Commands
 
-- `pip install -r requirements.txt`
+- `pip install -r requirements.txt` (plus `pip install pytest` for tests)
 - `python -m streamlit run app.py`
 - `python -m pytest -q tests/`
 - `python self_test.py`
-- `python evals/make_cases.py`
+- `python evals/make_cases.py` and `python evals/make_manual_cases.py` (rebuild eval cases from the CSVs)
+- `python evals/run_evals.py` (score the SQL agent on the eval cases; needs `GROQ_API_KEY`)
+- `docker build -t agentic-data-analyst . && docker run -p 7860:7860 -e GROQ_API_KEY=... agentic-data-analyst`
 
 ## Always
 
@@ -50,5 +52,5 @@ Agentic Data Analyst is a Streamlit app where you upload CSV files and ask quest
 
 ## Week 1 scope
 
-- AGENTS.md, Dockerfile, HF Space deploy workflow, 30+ pandas eval cases, README eval table.
+- AGENTS.md, Dockerfile, HF Space deploy workflow, 36 scripted + 10 manual pandas eval cases, eval runner, README eval table.
 - Do not merge until review. HF deploy runs after merge to `main`.
