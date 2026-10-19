@@ -11,7 +11,10 @@ from chromadb.config import Settings
 from agents.llm_client import chat_completion
 from utils.chunking import chunk_text, format_exchange_for_rag
 
-CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma")
+# ADA_CHROMA_DIR lets an installed copy (e.g. the mcp server) keep its index outside site-packages
+CHROMA_DIR = os.getenv("ADA_CHROMA_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "chroma"
+)
 _embedder = None
 
 
