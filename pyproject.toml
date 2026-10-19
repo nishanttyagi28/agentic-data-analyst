@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-data-analyst-mcp"
+dynamic = ["version"]
+description = "MCP server for querying CSV data with read-only SQL and a Groq-backed SQL agent"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Nishant Tyagi" }]
+keywords = ["mcp", "model-context-protocol", "sql", "sqlite", "csv", "data-analysis", "groq"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+# only what the mcp server imports; the full streamlit app still uses requirements.txt
+dependencies = [
+    "mcp>=1.10,<2",
+    "pandas>=2.0",
+    "sqlalchemy>=2.0",
+    "groq>=1.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+rag = ["chromadb>=1.0", "sentence-transformers>=3.0"]
+test = ["pytest>=8"]
+
+[project.scripts]
+ada-mcp = "ada_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/nishanttyagi28/agentic-data-analyst"
+Source = "https://github.com/nishanttyagi28/agentic-data-analyst"
+Issues = "https://github.com/nishanttyagi28/agentic-data-analyst/issues"
+
+[tool.setuptools]
+packages = ["ada_mcp", "agents", "db", "utils", "sample_data"]
+
+[tool.setuptools.package-data]
+sample_data = ["*.csv"]
+
+[tool.setuptools.dynamic]
+version = { attr = "ada_mcp.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

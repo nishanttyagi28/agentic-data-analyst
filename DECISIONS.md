@@ -165,3 +165,11 @@
 | 3 | H–L | (preventive) multi-table SQL must see all tables | `run_sql_query(..., tables=)` + multi schema context |
 
 Full regression re-run after H–L: see self_test output at ship time.
+
+### Phase M — MCP server
+
+46. **Thin wrapper, not a second app** — `ada_mcp/tools.py` only validates input and shapes output; SQL generation, the self-check retry, the read-only guard and ingestion all come from `agents/` and `db/`.
+47. **Writes are refused, not executed** — SQL that fails `is_safe_select` and contains write/DDL keywords returns `needs_human_approval` with the statement. There is no tool that runs it.
+48. **In-memory SQLite by default** — Each server process starts empty; `ADA_MCP_DB` opts in to a file so tables survive restarts.
+49. **`mcp>=1.10,<2`** — Uses `FastMCP` from the 1.x SDK. 2.x renames it (`MCPServer`) and changes other APIs; moving is a separate change.
+50. **Existing top-level packages are shipped as-is** — The wheel installs `agents`, `db`, `utils` and `sample_data` next to `ada_mcp` rather than renaming public modules. Those are generic names, so this should move under one package before a PyPI release.

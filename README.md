@@ -61,6 +61,7 @@ The orchestrator is plain Python, not a framework like LangGraph. LLM calls go t
 ```text
 app.py          Streamlit entry point
 agents/         orchestrator and specialist agents
+ada_mcp/        MCP server that exposes the SQL path as tools
 db/             SQLite helpers
 utils/          env loading, chunking, charts
 sample_data/    two small demo CSVs
@@ -85,10 +86,50 @@ python -m pytest -q tests/        # unit tests, no API key needed
 python self_test.py               # end-to-end script; LLM steps skip without GROQ_API_KEY
 ```
 
-CI runs the unit tests on pull requests and pushes to `main`.
+CI runs the unit tests (including the MCP tool tests) and a package build on pull requests and pushes to `main`.
 
 Deployment is covered in [Deploy](#deploy). Don't commit `.env`.
 
+
+## MCP server
+
+The same SQL path is available as an [MCP](https://modelcontextprotocol.io/) server, so an MCP client (Claude Desktop, VS Code, or any other client that speaks stdio) can load CSVs and query them. It reuses `agents/` and `db/`, including the read-only guard, and needs none of the ML or Streamlit dependencies.
+
+```bash
+pip install -e .                  # from a clone; adds the ada-mcp command
+ada-mcp                           # or: python -m ada_mcp (talks MCP over stdin/stdout)
+```
+
+`pip install -e ".[rag]"` adds `chromadb` and `sentence-transformers` for `search_history`. The package is not on PyPI yet; `python -m build` produces the sdist and wheel locally.
+
+| Tool | What it does |
+|------|--------------|
+| `load_dataset` | Load a bundled sample (`customer_churn`, `house_prices`) or a `.csv` path into SQLite |
+| `list_tables` | Loaded tables, likely join keys, available samples |
+| `describe_table` | Columns and types, row count, first rows |
+| `run_sql` | One read-only `SELECT` / `WITH` query, rows capped (default 100) |
+| `ask` | Plain-English question through the SQL agent (needs `GROQ_API_KEY`) |
+| `search_history` | Search earlier `ask` answers; off unless `ADA_MCP_RAG=1` |
+
+Write or DDL SQL (from `run_sql` or from the model inside `ask`) is never run. The tool returns `status: "needs_human_approval"` with the statement so a person can decide what to do with it.
+
+Client config (Claude Desktop uses `claude_desktop_config.json`; other clients have an equivalent `mcpServers` block). Use the full path to `ada-mcp` inside your virtualenv:
+
+```json
+{
+  "mcpServers": {
+    "data-analyst": {
+      "command": "/path/to/venv/bin/ada-mcp",
+      "env": {
+        "GROQ_API_KEY": "your_key_here",
+        "GROQ_MODEL": "openai/gpt-oss-120b"
+      }
+    }
+  }
+}
+```
+
+Optional env: `ADA_MCP_DB=/path/to/file.db` keeps loaded tables between runs (default is in-memory), `ADA_MCP_RAG=1` turns on `search_history`, `ADA_CHROMA_DIR` sets where its index lives.
 
 ## Eval cases (pandas ground truth)
 
