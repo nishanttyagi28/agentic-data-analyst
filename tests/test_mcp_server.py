@@ -3,9 +3,9 @@
 import anyio
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from agents import sql_agent
 from ada_mcp.server import build_server
 from ada_mcp.workspace import Workspace
+from agents import sql_agent
 
 EXPECTED_TOOLS = {"load_dataset", "list_tables", "describe_table", "run_sql", "ask", "search_history"}
 

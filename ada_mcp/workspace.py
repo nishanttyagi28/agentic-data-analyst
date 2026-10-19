@@ -39,11 +39,11 @@ class Workspace:
     rag: Any = None
 
     @classmethod
-    def in_memory(cls) -> "Workspace":
+    def in_memory(cls) -> Workspace:
         return cls(engine=_memory_engine())
 
     @classmethod
-    def from_env(cls) -> "Workspace":
+    def from_env(cls) -> Workspace:
         """ADA_MCP_DB=<path> keeps tables in a SQLite file between runs; default is in-memory."""
         db_path = os.getenv("ADA_MCP_DB", "").strip()
         if not db_path:

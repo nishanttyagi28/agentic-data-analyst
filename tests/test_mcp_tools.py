@@ -3,9 +3,9 @@
 import pandas as pd
 import pytest
 
-from agents import sql_agent
 from ada_mcp import tools
 from ada_mcp.workspace import Workspace
+from agents import sql_agent
 
 
 @pytest.fixture
